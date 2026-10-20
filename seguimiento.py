@@ -39,6 +39,29 @@ LIBRE = "CRÉDITO TERMINADO · CLIENTE LIBRE"
 CONTACTADO = "CONTACTADO"
 ESTATUS = {e: (q, fondo, letra) for e, q, fondo, letra in pz.ESTATUS_LISTA}
 URGENTES = [LLAMAR_EXT, FIN_LLAMAR, CONTADO, LIBRE]
+# Solo para la app y el PDF (no está en el Excel): su día ideal para llamar cae en el mes actual y la póliza
+# externa todavía está abierta, así que ya se le puede llamar.
+ADELANTAR = "EXTERNA ABIERTA · PUEDES LLAMAR YA"
+ADELANTAR_FIN = "TERMINA SU CRÉDITO · PUEDES LLAMAR YA"
+ESTATUS[ADELANTAR] = ("Su día ideal para llamar es este mes y la externa sigue abierta: adelántate", "F8D7DA", "9C0006")
+ESTATUS[ADELANTAR_FIN] = ("Su crédito termina pronto y su día ideal para llamar es este mes", "E4DFEC", "5B2C83")
+
+
+def fin_de_mes(hoy):
+    sig = dt.date(hoy.year + hoy.month // 12, hoy.month % 12 + 1, 1)
+    return sig - dt.timedelta(days=1)
+
+
+def para_contactar(df, hoy=None):
+    """Clientes a contactar ya: los urgentes y los que su «llamar desde» cae en lo que queda del mes
+    (la externa sigue abierta, así que no hay que esperar). Ordenados por lo que vence primero."""
+    hoy = hoy or dt.date.today()
+    urg = df[df["ESTATUS"].isin(URGENTES)]
+    lim = fin_de_mes(hoy)
+    ade = df[df["ESTATUS"].isin([PROXIMO, FIN_PROX]) & df["LLAMAR DESDE"].map(lambda d: d is not None and d <= lim)].copy()
+    ade["ESTATUS"] = ade["ESTATUS"].map({PROXIMO: ADELANTAR, FIN_PROX: ADELANTAR_FIN})
+    ade["QUÉ HACER"] = ade["ESTATUS"].map(lambda e: ESTATUS[e][0])
+    return pd.concat([urg, ade]).sort_values("DÍAS QUE QUEDAN", na_position="last")
 RESULTADOS = pz.RESULTADOS
 CIERRES = ["Vendida (póliza externa)", "Pagará de contado"]
 
@@ -441,20 +464,38 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
         t.setStyle(TableStyle(estilos))
         return t
 
+    MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
+             "noviembre", "diciembre"]
     el = [Paragraph("Para contactar ya", st["h2"])]
-    urg = df_hoy[df_hoy["ESTATUS"].isin(URGENTES)]
+    urg = para_contactar(df_hoy, hoy)
     if urg.empty:
         el.append(P("Hoy no hay clientes con ventana abierta.", "txt"))
     else:
+        el.append(P(f"{len(urg)} clientes · incluye a los que les toca llamar en lo que queda de "
+                    f"{MESES[hoy.month - 1]}: su póliza externa sigue abierta, así que puedes adelantarte", "sub"))
         el.append(tabla(urg, ["ESTATUS", "NOMBRE", "TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD",
                               "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
                         [.10, .15, .085, .095, .072, .05, .075, .058, .17, .145], "ESTATUS"))
-    el += [Spacer(1, 14), Paragraph(f"Oportunidades de {titulo_periodo}", st["h2"])]
+    esp = df_hoy[df_hoy["ESTATUS"] == EXT_CERRADA].sort_values("ABRE CONTADO")
+    if not esp.empty:
+        el += [Spacer(1, 14), Paragraph("Externa cerrada · llamar cuando abra el contado", st["h2"]),
+               P(f"{len(esp)} clientes · ya no se puede póliza externa; recuérdales pagar de contado a partir de la "
+                 "fecha en que abre la ventana", "sub"),
+               tabla(esp, ["ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "PRÓXIMA FECHA", "OPORTUNIDAD", "NOMBRE", "TELÉFONO",
+                           "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
+                     [.075, .075, .075, .05, .16, .085, .075, .058, .2, .147])]
+    ya = set(urg["SERIE"]) | set(esp["SERIE"])
+    total = len(df_periodo)
+    df_periodo = df_periodo[~df_periodo["SERIE"].isin(ya)] if total else df_periodo
+    el += [Spacer(1, 14), Paragraph(f"Calendario de {titulo_periodo} · todavía no toca", st["h2"])]
     if df_periodo.empty:
-        el.append(P("Sin oportunidades en el periodo.", "txt"))
+        el.append(P(f"Las {total} oportunidades de {titulo_periodo} ya aparecen arriba." if total
+                    else "Sin oportunidades en el periodo.", "txt"))
     else:
-        el.append(P(f"{len(df_periodo)} oportunidades · prima anual en juego "
-                    f"${df_periodo['PRIMA ANUAL ACTUAL'].sum():,.0f}", "sub"))
+        el.append(P(f"{len(df_periodo)} oportunidades cuyo día ideal para llamar (LLAMAR DESDE) cae en "
+                    f"{titulo_periodo} · prima anual en juego ${df_periodo['PRIMA ANUAL ACTUAL'].sum():,.0f}"
+                    + (f" · {total - len(df_periodo)} más ya aparecen arriba" if total > len(df_periodo) else ""),
+                    "sub"))
         el.append(tabla(df_periodo, ["LLAMAR DESDE", "FECHA", "TIPO", "OPORTUNIDAD", "NOMBRE", "TELÉFONO",
                                      "CORREO", "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
                         [.072, .072, .07, .05, .145, .085, .105, .075, .058, .158, .11]))

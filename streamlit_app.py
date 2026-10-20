@@ -157,8 +157,11 @@ contactados = df["CONTACTADO"].astype(str).str.lower().isin(["sí", "si"]).sum()
 cierres = df["RESULTADO"].isin(ps.CIERRES).sum()
 
 k = st.columns(5)
-tarjeta(k[0], "call", "Llamar ya", n(ps.LLAMAR_EXT) + n(ps.FIN_LLAMAR),
-           f"{n(ps.LLAMAR_EXT)} póliza externa · {n(ps.FIN_LLAMAR)} fin de crédito", "#9C0006")
+_pc = ps.para_contactar(df, hoy)
+_ext = int(_pc["ESTATUS"].isin([ps.LLAMAR_EXT, ps.ADELANTAR]).sum())
+_fin = int(_pc["ESTATUS"].isin([ps.FIN_LLAMAR, ps.ADELANTAR_FIN]).sum())
+tarjeta(k[0], "call", "Llamar ya", _ext + _fin,
+           f"{_ext} póliza externa · {_fin} fin de crédito (incluye lo que queda del mes)", "#9C0006")
 tarjeta(k[1], "payments", "Contado abierto", n(ps.CONTADO), "Que paguen antes del día anterior al aniversario",
            "#9C5700")
 tarjeta(k[2], "lock_clock", "Externa cerrada", n(ps.EXT_CERRADA), "Esperan su ventana de contado", "#C55A11")
@@ -221,15 +224,12 @@ t_hoy, t_mes, t_todos, t_seg = st.tabs([":material/today: Hoy", ":material/calen
                                         ":material/groups: Todos", ":material/edit_note: Seguimiento"])
 
 with t_hoy:
-    urg = df[df["ESTATUS"].isin(ps.URGENTES)]
-    st.markdown(f"**Para contactar ya ({len(urg)})** · ordenados por lo que vence primero")
-    ver(urg.sort_values("DÍAS QUE QUEDAN", na_position="last"), COLS_HOY)
-    sem = df[(df["ESTATUS"].isin([ps.PROXIMO, ps.FIN_PROX])) &
-             (df["LLAMAR DESDE"] <= hoy + dt.timedelta(days=7))]
-    st.markdown(f"**Empiezan a llamarse en los próximos 7 días ({len(sem)})**")
-    ver(sem, COLS_HOY)
-    esp = df[df["ESTATUS"] == ps.EXT_CERRADA]
-    st.markdown(f"**Externa cerrada, esperando contado ({len(esp)})**")
+    urg = ps.para_contactar(df, hoy)
+    st.markdown(f"**Para contactar ya ({len(urg)})** · ordenados por lo que vence primero. Incluye a los que les "
+                f"toca llamar en lo que queda de {MESES[hoy.month - 1]}: su externa sigue abierta, puedes adelantarte.")
+    ver(urg, COLS_HOY)
+    esp = df[df["ESTATUS"] == ps.EXT_CERRADA].sort_values("ABRE CONTADO")
+    st.markdown(f"**Externa cerrada · llamar cuando abra el contado ({len(esp)})**")
     ver(esp, COLS_HOY)
 
 with t_mes:
