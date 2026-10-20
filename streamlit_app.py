@@ -26,6 +26,7 @@ import altair as alt  # noqa: E402
 import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
+import almacen  # noqa: E402
 import seguimiento as ps  # noqa: E402
 
 st.set_page_config(page_title="Pólizas MG Colima", page_icon="🛡️", layout="wide")
@@ -91,6 +92,23 @@ hero("Pólizas de seguro · MG Colima", "A quién llamar para póliza externa, p
      f"Corte {hoy:%d/%m/%Y}")
 
 # ----------------------------------------------------------------------------- carga
+def guardar_actual():
+    """Guarda el Excel con el seguimiento actual para la próxima vez que se abra la app."""
+    ok, msg = almacen.guardar(st.session_state["pol_excel"])
+    st.session_state["pol_guardado"] = (ok, msg, dt.datetime.now())
+
+
+# al abrir: si no hay nada cargado, toma el último Excel guardado
+if st.session_state.get("pol_base") is None and not st.session_state.get("pol_auto"):
+    st.session_state["pol_auto"] = True
+    datos, origen = almacen.leer()
+    if datos:
+        try:
+            base, excel, errores = ps.cargar([], datos)
+            st.session_state.update(pol_base=base, pol_excel=excel, pol_err=errores, pol_origen=f"último Excel ({origen})")
+        except Exception:
+            pass
+
 with st.container(border=True):
     c1, c2 = st.columns([3, 2])
     pdfs = c1.file_uploader("Pólizas (PDF o ZIP)", type=["pdf", "zip"], accept_multiple_files=True, key="pol_pdfs",
@@ -107,6 +125,7 @@ with st.container(border=True):
                 st.session_state.update(pol_base=base, pol_excel=excel, pol_err=errores,
                                         pol_origen=f"{len(pdfs)} archivo(s) PDF/ZIP" if pdfs else xls.name)
                 st.session_state.pop("pol_editor", None)
+                guardar_actual()
             except Exception as e:
                 st.error(f"No se pudo cargar: {e}")
 
@@ -149,6 +168,11 @@ tarjeta(k[3], "event_upcoming", f"Este mes ({MESES[hoy.month - 1]})", len(mes_si
 tarjeta(k[4], "verified", "Contactados", int(contactados),
            f"{cierres} cerrados ({cierres / contactados:.0%})" if contactados else "Aún sin registrar")
 st.caption(f"{len(df)} créditos · fuente: {st.session_state.get('pol_origen', '')}")
+if st.session_state.get("pol_guardado"):
+    ok, msg, cuando = st.session_state["pol_guardado"]
+    st.caption(f"{':material/cloud_done:' if ok else ':material/save:'} {msg} · {cuando:%H:%M}"
+               + ("" if almacen.drive_configurado() else
+                  " · se conserva mientras la app esté activa; para guardarlo siempre, configura Drive (README)"))
 
 COLS_HOY = ["ESTATUS", "CLIENTE", "TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD", "LLAMAR DESDE",
             "ÚLTIMO DÍA EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "QUÉ HACER", "ASEGURADORA",
@@ -270,10 +294,13 @@ with t_seg:
                        "FECHA CONTACTO": st.column_config.DateColumn("FECHA CONTACTO", format="DD/MM/YYYY"),
                        "RESULTADO": st.column_config.SelectboxColumn("RESULTADO", options=ps.RESULTADOS, width="medium"),
                        "NOTAS": st.column_config.TextColumn("NOTAS", width="large")})
-    if st.button("Actualizar estatus", icon=":material/refresh:",
-                 help="Pasa lo capturado a los indicadores y estatus. La descarga del Excel ya lo incluye."):
+    if st.button("Guardar y actualizar estatus", icon=":material/save:", type="primary",
+                 help="Guarda lo capturado (ya no tienes que volver a subir el Excel) y actualiza indicadores."):
         st.session_state["pol_base"] = con_seguimiento(st.session_state["pol_base"], editado)
+        st.session_state["pol_excel"] = ps.aplicar_seguimiento(st.session_state["pol_excel"],
+                                                               st.session_state["pol_base"])
         st.session_state.pop("pol_editor", None)
+        guardar_actual()
         st.rerun()
     res = df[df["RESULTADO"].astype(str).str.strip() != ""]
     if not res.empty:

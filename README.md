@@ -62,3 +62,27 @@ streamlit run streamlit_app.py
 
 `polizas.py` también funciona solo: pégalo en Colab, ejecuta la celda, sube los PDF/ZIP (y el Excel anterior si lo
 tienes) con el botón y se descarga el Excel.
+
+## Guardar el Excel para no subirlo cada vez
+
+Al cargar el Excel (o los PDF) y al dar **Guardar y actualizar estatus**, la app guarda el Excel y lo abre sola la próxima vez.
+
+- **Sin configurar nada:** se guarda en el servidor de Streamlit. Se pierde si la app se reinicia o se duerme por inactividad (entonces vuelves a subirlo una vez).
+- **Permanente (Google Drive):**
+  1. En Google Cloud Console crea un proyecto, activa **Google Drive API** y crea una **cuenta de servicio** con una clave JSON.
+  2. Sube a tu Drive el `Polizas_extraidas.xlsx` y compártelo como **Editor** con el `client_email` de la cuenta de servicio.
+  3. Copia el ID del archivo (lo que va entre `/d/` y `/view` en el enlace).
+  4. En Streamlit → Settings → Secrets agrega:
+
+```toml
+POLIZAS_DRIVE_FILE_ID = "id-del-archivo"
+
+[gcp_service_account]
+type = "service_account"
+project_id = "..."
+private_key_id = "..."
+private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+client_email = "...@....iam.gserviceaccount.com"
+client_id = "..."
+token_uri = "https://oauth2.googleapis.com/token"
+```

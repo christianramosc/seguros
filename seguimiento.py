@@ -80,8 +80,21 @@ def leer_contacto(excel_bytes):
         if c in df.columns:
             df[c] = df[c].map(lambda v: "" if pd.isna(v) else str(v).strip().removesuffix(".0"))
     df["PRIMA ANUAL ACTUAL"] = pd.to_numeric(df.get("PRIMA ANUAL ACTUAL"), errors="coerce")
+    # datos del cliente y del vehículo que solo están en «Base de datos» (RFC, motor, CP)
+    extra = {"RFC": "", "MOTOR": "", "CP": ""}
+    if "Base de datos" in xl.sheet_names:
+        bd = pd.read_excel(xl, "Base de datos", dtype=str)
+        if "SERIE" in bd.columns:
+            bd = bd.drop_duplicates("SERIE").set_index("SERIE")
+            for c in extra:
+                if c in bd.columns:
+                    df[c] = df["SERIE"].map(bd[c]).map(lambda v: "" if pd.isna(v) else str(v).strip().removesuffix(".0"))
+    for c, v in extra.items():
+        if c not in df.columns:
+            df[c] = v
     keep = ["CLIENTE", "TELÉFONO", "CORREO", "ASEGURADORA", "PÓLIZA ACTUAL", "PRIMA ANUAL ACTUAL", "VEHÍCULO",
-            "SERIE", "FOLIO CRÉDITO", "MUNICIPIO", "DIRECCIÓN", "PRIMERA OPORTUNIDAD", "FIN DEL CRÉDITO"] + COLS_SEG
+            "SERIE", "MOTOR", "RFC", "FOLIO CRÉDITO", "MUNICIPIO", "DIRECCIÓN", "CP", "PRIMERA OPORTUNIDAD",
+            "FIN DEL CRÉDITO"] + COLS_SEG
     return df[[c for c in keep if c in df.columns]].reset_index(drop=True)
 
 
@@ -291,6 +304,8 @@ def proyeccion(base, hoy=None, meses=12, reglas=REGLAS):
                               "LLAMAR DESDE": llamar, "FECHA": fecha, "TIPO": tipo, "OPORTUNIDAD": op,
                               "CLIENTE": f["CLIENTE"], "TELÉFONO": f["TELÉFONO"], "CORREO": f["CORREO"],
                               "ASEGURADORA": f["ASEGURADORA"], "VEHÍCULO": f["VEHÍCULO"], "SERIE": f["SERIE"],
+                              "MOTOR": f.get("MOTOR", ""), "RFC": f.get("RFC", ""),
+                              "DIRECCIÓN": f.get("DIRECCIÓN", ""), "CP": f.get("CP", ""),
                               "PRIMA ANUAL ACTUAL": f["PRIMA ANUAL ACTUAL"]})
     return pd.DataFrame(filas).sort_values(["LLAMAR DESDE", "CLIENTE"]).reset_index(drop=True) if filas else \
         pd.DataFrame(columns=["MES", "LLAMAR DESDE", "FECHA", "TIPO", "OPORTUNIDAD", "CLIENTE"])
@@ -343,6 +358,7 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
         nombre=ParagraphStyle("nombre", fontName="Helvetica-Bold", fontSize=8.3, leading=10.5,
                               textColor=colors.HexColor(TINTA)),
         celda=ParagraphStyle("celda", fontSize=8, leading=10, **base_estilo),
+        chico=ParagraphStyle("chico", fontSize=7, leading=9, **base_estilo),
         enc=ParagraphStyle("enc", fontName="Helvetica-Bold", fontSize=7.3, leading=9,
                            textColor=colors.HexColor(TINTA_2)))
     telefono = lambda v: "" if v is None or str(v).strip() in ("", "nan") else str(v).strip().removesuffix(".0")
@@ -375,15 +391,41 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
     f = lambda d: d.strftime("%d/%m/%Y") if isinstance(d, dt.date) else ""
     P = lambda t, s="celda": Paragraph(_e(t), st[s])
 
+    def txt(v):
+        return "" if v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() in ("nan", "NaT") \
+            else str(v).strip().removesuffix(".0")
+
+    def compuesta(c, r):
+        """Celdas con varios datos del cliente en renglones: nombre+RFC, vehículo+serie+motor, dirección+CP."""
+        gris = f'<font color="{TINTA_2}" size="7">'
+        if c == "NOMBRE":
+            linea = [f"<b>{_e(txt(r.get('CLIENTE')))}</b>"]
+            if txt(r.get("RFC")):
+                linea.append(f"{gris}RFC: {_e(txt(r.get('RFC')))}</font>")
+        elif c == "DATOS DEL VEHÍCULO":
+            linea = [_e(txt(r.get("VEHÍCULO")))]
+            for k, et in (("SERIE", "Serie"), ("MOTOR", "Motor")):
+                if txt(r.get(k)):
+                    linea.append(f"{gris}{et}: {_e(txt(r.get(k)))}</font>")
+        else:  # DIRECCIÓN
+            linea = [_e(txt(r.get("DIRECCIÓN")))]
+            if txt(r.get("CP")):
+                linea.append(f"{gris}CP: {_e(txt(r.get('CP')))}</font>")
+        return Paragraph("<br/>".join(x for x in linea if x), st["chico" if c != "NOMBRE" else "celda"])
+
     def tabla(df, cols, anchos, color_col=None):
         filas = [[P(c, "enc") for c in cols]]
         estilos = [("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.HexColor(NAVY)),
                    ("LINEBELOW", (0, 1), (-1, -1), 0.3, colors.HexColor(LINEA)),
                    ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                   ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]
+                   ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                   ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3)]
         for i, (_, r) in enumerate(df.iterrows(), start=1):
             fila = []
             for c in cols:
+                if c in ("NOMBRE", "DATOS DEL VEHÍCULO", "DIRECCIÓN"):
+                    fila.append(compuesta(c, r))
+                    continue
                 v = r.get(c, "")
                 if isinstance(v, dt.date):
                     v = f(v)
@@ -404,17 +446,17 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
     if urg.empty:
         el.append(P("Hoy no hay clientes con ventana abierta.", "txt"))
     else:
-        el.append(tabla(urg, ["ESTATUS", "CLIENTE", "TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD",
-                              "ASEGURADORA", "PRIMA ANUAL ACTUAL", "VEHÍCULO"],
-                        [.15, .17, .095, .14, .08, .065, .085, .07, .145], "ESTATUS"))
+        el.append(tabla(urg, ["ESTATUS", "NOMBRE", "TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD",
+                              "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
+                        [.10, .15, .085, .095, .072, .05, .075, .058, .17, .145], "ESTATUS"))
     el += [Spacer(1, 14), Paragraph(f"Oportunidades de {titulo_periodo}", st["h2"])]
     if df_periodo.empty:
         el.append(P("Sin oportunidades en el periodo.", "txt"))
     else:
         el.append(P(f"{len(df_periodo)} oportunidades · prima anual en juego "
                     f"${df_periodo['PRIMA ANUAL ACTUAL'].sum():,.0f}", "sub"))
-        el.append(tabla(df_periodo, ["LLAMAR DESDE", "FECHA", "TIPO", "OPORTUNIDAD", "CLIENTE", "TELÉFONO",
-                                     "CORREO", "ASEGURADORA", "PRIMA ANUAL ACTUAL"],
-                        [.08, .08, .09, .07, .2, .095, .19, .085, .09]))
+        el.append(tabla(df_periodo, ["LLAMAR DESDE", "FECHA", "TIPO", "OPORTUNIDAD", "NOMBRE", "TELÉFONO",
+                                     "CORREO", "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
+                        [.072, .072, .07, .05, .145, .085, .105, .075, .058, .158, .11]))
     doc.build(el)
     return buf.getvalue()
