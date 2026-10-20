@@ -56,14 +56,18 @@ def fin_de_mes(hoy):
 
 def para_contactar(df, hoy=None):
     """Clientes a contactar ya: los urgentes y los que su «llamar desde» cae en lo que queda del mes
-    (la externa sigue abierta, así que no hay que esperar). Ordenados por lo que vence primero."""
+    (la externa sigue abierta, así que no hay que esperar). Ordenados por estatus y luego por lo que vence primero."""
     hoy = hoy or dt.date.today()
     urg = df[df["ESTATUS"].isin(URGENTES)]
     lim = fin_de_mes(hoy)
     ade = df[df["ESTATUS"].isin([PROXIMO, FIN_PROX]) & df["LLAMAR DESDE"].map(lambda d: d is not None and d <= lim)].copy()
     ade["ESTATUS"] = ade["ESTATUS"].map({PROXIMO: ADELANTAR, FIN_PROX: ADELANTAR_FIN})
     ade["QUÉ HACER"] = ade["ESTATUS"].map(lambda e: ESTATUS[e][0])
-    return pd.concat([urg, ade]).sort_values("DÍAS QUE QUEDAN", na_position="last")
+    # agrupados por estatus (de lo más urgente a lo menos) y dentro de cada uno por lo que vence primero
+    orden = {e: i for i, e in enumerate([ULTIMA, LLAMAR_EXT, ADELANTAR, CONTADO, FIN_LLAMAR, ADELANTAR_FIN, LIBRE])}
+    out = pd.concat([urg, ade])
+    return (out.assign(_o=out["ESTATUS"].map(orden))
+            .sort_values(["_o", "DÍAS QUE QUEDAN"], na_position="last").drop(columns="_o"))
 RESULTADOS = pz.RESULTADOS
 CIERRES = ["Vendida (póliza externa)", "Pagará de contado"]
 

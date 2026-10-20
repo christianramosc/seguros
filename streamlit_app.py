@@ -229,7 +229,7 @@ t_hoy, t_mes, t_todos, t_seg = st.tabs([":material/today: Hoy", ":material/calen
 
 with t_hoy:
     urg = ps.para_contactar(df, hoy)
-    st.markdown(f"**Para contactar ya ({len(urg)})** · ordenados por lo que vence primero. Incluye a los que les "
+    st.markdown(f"**Para contactar ya ({len(urg)})** · ordenados por estatus y por lo que vence primero. Incluye a los que les "
                 f"toca llamar en lo que queda de {MESES[hoy.month - 1]}: su externa sigue abierta, puedes adelantarte.")
     ver(urg, COLS_HOY)
     esp = df[df["ESTATUS"] == ps.EXT_CERRADA].sort_values("ABRE CONTADO")
