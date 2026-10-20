@@ -12,7 +12,7 @@ Python lo mismo que las fórmulas del Excel, para cualquier fecha:
   pdf(...)                             → reporte de contactos del periodo
 
 Reglas (días naturales antes de cada aniversario de la póliza):
-  · póliza externa: a más tardar 45 días antes (después se cierra)
+  · póliza externa: lo ideal es a más tardar 45 días antes; de 44 a 39 es la última oportunidad y a los 38 ya no
   · pago de contado: desde 30 días antes hasta el día anterior
   · llamar al menos 7 días antes del límite de externa
   · al terminar el crédito el auto es del cliente: puede contratar el seguro que quiera.
@@ -26,10 +26,12 @@ import pandas as pd
 
 import polizas as pz
 
-REGLAS = dict(externa=pz.DIAS_POLIZA_EXTERNA, contado=pz.DIAS_PAGO_CONTADO, aviso=pz.DIAS_AVISO_PREVIO)
+REGLAS = dict(externa=pz.DIAS_POLIZA_EXTERNA, contado=pz.DIAS_PAGO_CONTADO, aviso=pz.DIAS_AVISO_PREVIO,
+              cero=pz.DIAS_EXTERNA_CERO)
 
 # Estatus en el orden en que van pasando (los mismos textos que el Excel)
 PROXIMO = "PRÓXIMO"
+ULTIMA = "ÚLTIMA OPORTUNIDAD · EXTERNA"
 LLAMAR_EXT = "LLAMAR YA · PÓLIZA EXTERNA"
 EXT_CERRADA = "EXTERNA CERRADA · ESPERAR CONTADO"
 CONTADO = "VENTANA DE CONTADO ABIERTA"
@@ -38,7 +40,7 @@ FIN_LLAMAR = "LLAMAR YA · TERMINA SU CRÉDITO"
 LIBRE = "CRÉDITO TERMINADO · CLIENTE LIBRE"
 CONTACTADO = "CONTACTADO"
 ESTATUS = {e: (q, fondo, letra) for e, q, fondo, letra in pz.ESTATUS_LISTA}
-URGENTES = [LLAMAR_EXT, FIN_LLAMAR, CONTADO, LIBRE]
+URGENTES = [LLAMAR_EXT, ULTIMA, FIN_LLAMAR, CONTADO, LIBRE]
 # Solo para la app y el PDF (no está en el Excel): su día ideal para llamar cae en el mes actual y la póliza
 # externa todavía está abierta, así que ya se le puede llamar.
 ADELANTAR = "EXTERNA ABIERTA · PUEDES LLAMAR YA"
@@ -167,6 +169,23 @@ def filas_de_excel(excel_bytes):
     return filas
 
 
+def _al_dia(excel):
+    """Si el Excel es de una versión anterior (sin la columna OPORTUNIDAD 0 EXTERNA), lo vuelve a armar con las
+    reglas actuales conservando el seguimiento capturado."""
+    from openpyxl import load_workbook
+    ws = load_workbook(io.BytesIO(excel), read_only=True)["Contacto"]
+    hdr = [c.value for c in next(ws.iter_rows(min_row=HDR_CONTACTO, max_row=HDR_CONTACTO))]
+    if "OPORTUNIDAD 0 EXTERNA" in hdr:
+        return excel
+    with tempfile.TemporaryDirectory() as tmp:
+        salida = os.path.join(tmp, "Polizas_extraidas.xlsx")
+        with open(salida, "wb") as f:
+            f.write(excel)
+        pz.guardar_excel(filas_de_excel(excel), [], salida)
+        with open(salida, "rb") as f:
+            return f.read()
+
+
 def cargar(archivos, excel_anterior=None):
     """archivos: [(nombre, bytes)] de PDFs y/o ZIPs. excel_anterior: bytes del Polizas_extraidas.xlsx (opcional).
     Con PDFs: los lee, los junta con los créditos del Excel anterior (los PDFs nuevos mandan si se repite una
@@ -175,7 +194,7 @@ def cargar(archivos, excel_anterior=None):
     if not archivos:
         if not excel_anterior:
             raise ValueError("Sube los PDFs / ZIP de las pólizas o el Excel Polizas_extraidas.xlsx.")
-        return leer_contacto(excel_anterior), excel_anterior, []
+        return leer_contacto(excel_anterior := _al_dia(excel_anterior)), excel_anterior, []
     with tempfile.TemporaryDirectory() as tmp:
         carpeta = os.path.join(tmp, "pdfs")
         os.makedirs(carpeta)
@@ -228,9 +247,14 @@ def _total_oport(base, fin):
     return n
 
 
+def _dias(n):
+    return f"{n} día" if n == 1 else f"{n} días"
+
+
 def estado(fila, hoy, reglas=REGLAS):
     """Próxima oportunidad de un crédito vista desde «hoy»."""
     E, C, A = reglas["externa"], reglas["contado"], reglas["aviso"]
+    Z = reglas.get("cero", pz.DIAS_EXTERNA_CERO)
     base, fin = fila["PRIMERA OPORTUNIDAD"], fila["FIN DEL CRÉDITO"]
     if base is None:
         return {}
@@ -245,6 +269,7 @@ def estado(fila, hoy, reglas=REGLAS):
     llamar = d(E + A)
     r = {"TIPO": tipo, "PRÓXIMA FECHA": fecha, "LLAMAR DESDE": llamar,
          "ÚLTIMO DÍA EXTERNA": d(E) if tipo == "ANIVERSARIO" else None,
+         "OPORTUNIDAD 0 EXTERNA": d(Z) if tipo == "ANIVERSARIO" else None,
          "ABRE CONTADO": d(C) if tipo == "ANIVERSARIO" else None,
          "ÚLTIMO DÍA CONTADO": d(1) if tipo == "ANIVERSARIO" else None}
     tot = _total_oport(base, fin)
@@ -263,8 +288,10 @@ def estado(fila, hoy, reglas=REGLAS):
         est = FIN_LLAMAR if hoy >= llamar else FIN_PROX
     elif hoy >= d(C):
         est = CONTADO
-    elif hoy > d(E):
+    elif hoy >= d(Z):
         est = EXT_CERRADA
+    elif hoy > d(E):
+        est = ULTIMA
     elif hoy >= llamar:
         est = LLAMAR_EXT
     else:
@@ -276,13 +303,16 @@ def estado(fila, hoy, reglas=REGLAS):
         r["CIERRA EN"] = ""
     elif tipo == "FIN DE CRÉDITO":
         r["DÍAS QUE QUEDAN"] = (fecha - hoy).days
-        r["CIERRA EN"] = f"{(fecha - hoy).days} días para el fin del crédito"
-    elif est in (EXT_CERRADA, CONTADO) or (est == CONTACTADO and hoy > d(E)):
+        r["CIERRA EN"] = f"{_dias((fecha - hoy).days)} para el fin del crédito"
+    elif est in (EXT_CERRADA, CONTADO) or (est == CONTACTADO and hoy >= d(Z)):
         r["DÍAS QUE QUEDAN"] = (d(1) - hoy).days
-        r["CIERRA EN"] = f"{(d(1) - hoy).days} días para el último día de contado"
+        r["CIERRA EN"] = f"{_dias((d(1) - hoy).days)} para el último día de contado"
+    elif est == ULTIMA or (est == CONTACTADO and hoy > d(E)):
+        r["DÍAS QUE QUEDAN"] = (d(Z) - hoy).days
+        r["CIERRA EN"] = f"{_dias((d(Z) - hoy).days)} para oportunidad 0 de externa"
     else:
         r["DÍAS QUE QUEDAN"] = (d(E) - hoy).days
-        r["CIERRA EN"] = f"{(d(E) - hoy).days} días para el límite de externa"
+        r["CIERRA EN"] = f"{_dias((d(E) - hoy).days)} para el límite ideal de externa"
     return r
 
 
@@ -400,7 +430,7 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
         c.drawString(m, alto - 30, "Pólizas de seguro · clientes a contactar")
         c.setFont("Helvetica", 8.5)
         c.setFillColor(colors.HexColor("#C9D6EA"))
-        c.drawString(m, alto - 44, f"Póliza externa hasta 45 días antes del aniversario · contado de 30 días antes al día "
+        c.drawString(m, alto - 44, f"Póliza externa ideal hasta 45 días antes del aniversario, oportunidad 0 a los 38 · contado de 30 días antes al día "
                                    f"anterior · corte {hoy:%d/%m/%Y}")
         c.setFont("Helvetica", 7)
         c.setFillColor(colors.HexColor(TINTA_3))

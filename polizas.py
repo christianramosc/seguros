@@ -59,11 +59,13 @@ HILOS = 4            # PDFs que se procesan en paralelo
 # Reglas del contrato (días naturales ANTES de cada aniversario de la póliza).
 # Cómo funciona: cada crédito trae 2 pólizas -> la 1 (de contado al comprar) y la 2 (resto del plazo).
 # En CADA aniversario antes del fin del crédito el cliente puede:
-#   - contratar póliza externa: a más tardar DIAS_POLIZA_EXTERNA días antes del aniversario (luego se cierra)
+#   - contratar póliza externa: lo ideal es a más tardar DIAS_POLIZA_EXTERNA días antes del aniversario; después
+#     cada día es menos probable que se la acepten y a los DIAS_EXTERNA_CERO días ya no hay oportunidad
 #   - pagar de contado su seguro: desde DIAS_PAGO_CONTADO días antes hasta el día anterior
 # Si no hace ninguna, ese año el seguro se financia y le sube la mensualidad.
 # También se pueden cambiar después en la hoja "Parámetros" del Excel.
-DIAS_POLIZA_EXTERNA = 45   # último día para póliza externa (días antes del aniversario)
+DIAS_POLIZA_EXTERNA = 45   # límite ideal para póliza externa (días antes del aniversario)
+DIAS_EXTERNA_CERO = 38     # oportunidad 0: desde aquí ya no se acepta la póliza externa
 DIAS_PAGO_CONTADO = 30     # abre la ventana para pagar de contado
 DIAS_AVISO_PREVIO = 7      # llamar al menos N días antes del límite de póliza externa
 # ==============================================================================
@@ -784,6 +786,7 @@ RESULTADOS = ["Interesado", "Cotización enviada", "Vendida (póliza externa)", 
 ESTATUS_LISTA = [
     ("PRÓXIMO", "Todavía no; esperar a la fecha LLAMAR DESDE", "DDEBF7", "1F3864"),
     ("LLAMAR YA · PÓLIZA EXTERNA", "Llamar y cerrar la póliza externa antes del ÚLTIMO DÍA PÓLIZA EXTERNA", "FFC7CE", "9C0006"),
+    ("ÚLTIMA OPORTUNIDAD · EXTERNA", "Llamar hoy mismo: pasó el límite ideal y cada día es menos probable que acepten la externa; en OPORTUNIDAD 0 EXTERNA ya no", "F4B183", "843C0C"),
     ("EXTERNA CERRADA · ESPERAR CONTADO", "Ya no hay póliza externa; recordarle que pague de contado cuando abra la ventana", "FCE4D6", "C55A11"),
     ("VENTANA DE CONTADO ABIERTA", "Que pague de contado antes del ÚLTIMO DÍA CONTADO para no financiar el seguro", "FFEB9C", "9C5700"),
     ("PRÓXIMO · TERMINA SU CRÉDITO", "Su crédito termina pronto: el auto será suyo y su póliza vence ese día", "E4DFEC", "5B2C83"),
@@ -897,9 +900,10 @@ def guardar_excel(filas, errores, salida):
     # Parámetros arriba (celdas amarillas editables)
     wc["A1"] = "CONTACTO · PÓLIZAS DE SEGURO (una fila por cliente con su PRÓXIMA oportunidad: aniversario, fin de crédito o auto liberado)"
     wc["A1"].font = Font(name="Arial", size=13, bold=True, color="1F3864")
-    params = [("A2", "Último día para póliza externa (días antes del aniversario):", "D2", DIAS_POLIZA_EXTERNA),
+    params = [("A2", "Límite ideal póliza externa (días antes del aniversario):", "D2", DIAS_POLIZA_EXTERNA),
               ("E2", "Abre ventana de contado (días antes):", "H2", DIAS_PAGO_CONTADO),
-              ("I2", "Llamar N días antes del límite de externa:", "K2", DIAS_AVISO_PREVIO)]
+              ("I2", "Llamar N días antes del límite de externa:", "K2", DIAS_AVISO_PREVIO),
+              ("L2", "Oportunidad 0 de externa (días antes):", "O2", DIAS_EXTERNA_CERO)]
     for ce, et, cv, v in params:
         wc[ce] = et
         wc[ce].font = Font(name="Arial", size=9, bold=True)
@@ -907,11 +911,11 @@ def guardar_excel(filas, errores, salida):
         wc[cv].font = Font(name="Arial", size=10, bold=True, color="0000FF")
         wc[cv].fill = AMARILLO
         wc[cv].alignment = Alignment(horizontal="center")
-    PE, PC, PA = "$D$2", "$H$2", "$K$2"
+    PE, PC, PA, P0 = "$D$2", "$H$2", "$K$2", "$O$2"
 
     cc = ["ESTATUS HOY", "QUÉ HACER", "DÍAS QUE QUEDAN", "CLIENTE", "TELÉFONO", "CORREO",
           "PRÓXIMA FECHA", "OPORTUNIDAD", "LLAMAR DESDE", "ÚLTIMO DÍA PÓLIZA EXTERNA",
-          "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "CONTACTADO", "FECHA CONTACTO", "RESULTADO", "NOTAS",
+          "OPORTUNIDAD 0 EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "CONTACTADO", "FECHA CONTACTO", "RESULTADO", "NOTAS",
           "ASEGURADORA", "PÓLIZA ACTUAL", "PRIMA ANUAL ACTUAL", "VEHÍCULO", "SERIE", "FOLIO CRÉDITO",
           "MUNICIPIO", "DIRECCIÓN", "TIPO DE OPORTUNIDAD", "SIGUIENTE ANIVERSARIO", "PRIMERA OPORTUNIDAD",
           "FIN DEL CRÉDITO"]
@@ -950,21 +954,22 @@ def guardar_excel(filas, errores, salida):
                    f'IF({T}="CRÉDITO TERMINADO","CRÉDITO TERMINADO · CLIENTE LIBRE",'
                    f'IF({T}="FIN DE CRÉDITO",IF(TODAY()>={A}-{PE}-{PA},"LLAMAR YA · TERMINA SU CRÉDITO","PRÓXIMO · TERMINA SU CRÉDITO"),'
                    f'IF(TODAY()>={A}-{PC},"VENTANA DE CONTADO ABIERTA",'
-                   f'IF(TODAY()>{A}-{PE},"EXTERNA CERRADA · ESPERAR CONTADO",'
-                   f'IF(TODAY()>={A}-{PE}-{PA},"LLAMAR YA · PÓLIZA EXTERNA","PRÓXIMO"))))))')
+                   f'IF(TODAY()>={A}-{P0},"EXTERNA CERRADA · ESPERAR CONTADO",'
+                   f'IF(TODAY()>{A}-{PE},"ÚLTIMA OPORTUNIDAD · EXTERNA",'
+                   f'IF(TODAY()>={A}-{PE}-{PA},"LLAMAR YA · PÓLIZA EXTERNA","PRÓXIMO")))))))')
         que = "=" + "".join(f'IF({X["ESTATUS HOY"]}{i}="{e}","{q}",' for e, q, _, _ in ESTATUS_LISTA) + '""' + ")" * len(ESTATUS_LISTA)
         n_tot = f'IF({FN}="","?",DATEDIF({B},{FN},"y")+(DAY({B})<>DAY({FN})))'
         oport = (f'=IF({T}="FIN DE CRÉDITO","Fin del crédito",IF({T}="CRÉDITO TERMINADO","Auto ya liberado",'
                  f'(DATEDIF({B},{A},"y")+1)&" de "&{n_tot}))')
         dias = (f'=IF({T}="CRÉDITO TERMINADO","",IF({T}="FIN DE CRÉDITO",{A}-TODAY(),'
-                f'IF({A}-{PE}<TODAY(),"Externa cerrada",{A}-{PE}-TODAY())))')
+                f'IF(TODAY()>={A}-{P0},"Externa cerrada",IF(TODAY()>{A}-{PE},{A}-{P0}-TODAY(),{A}-{PE}-TODAY()))))')
         solo_aniv = lambda fx: f'=IF({T}="ANIVERSARIO",{fx},"No aplica")'
         seg = previo.get(u.get("SERIE"), (None, None, None, None))
         recuperados += any(seg)
         filas_c.append([
             estatus, que, dias,
             u.get("NOMBRE", ""), u.get("TELÉFONO", ""), u.get("CORREO", ""),
-            prox, oport, f"={A}-{PE}-{PA}", solo_aniv(f"{A}-{PE}"), solo_aniv(f"{A}-{PC}"), solo_aniv(f"{A}-1"),
+            prox, oport, f"={A}-{PE}-{PA}", solo_aniv(f"{A}-{PE}"), solo_aniv(f"{A}-{P0}"), solo_aniv(f"{A}-{PC}"), solo_aniv(f"{A}-1"),
             *seg,
             actual.get("ASEGURADORA", ""), actual.get("NO. PÓLIZA", ""), actual.get("PRIMA ANUAL EST."),
             limpiar(f"{u.get('DATOS DE VEHÍCULO', '')} {u.get('AÑO MODELO', '')}"), u.get("SERIE", ""),
@@ -972,13 +977,13 @@ def guardar_excel(filas, errores, salida):
     anchos_c = {"ESTATUS HOY": 34, "QUÉ HACER": 48, "DÍAS QUE QUEDAN": 12, "CLIENTE": 32,
                 "TELÉFONO": 13, "CORREO": 22, "PRÓXIMA FECHA": 13, "TIPO DE OPORTUNIDAD": 18,
                 "SIGUIENTE ANIVERSARIO": 13, "OPORTUNIDAD": 11, "LLAMAR DESDE": 12,
-                "ÚLTIMO DÍA PÓLIZA EXTERNA": 13, "ABRE CONTADO": 12, "ÚLTIMO DÍA CONTADO": 12, "CONTACTADO": 11,
+                "ÚLTIMO DÍA PÓLIZA EXTERNA": 13, "OPORTUNIDAD 0 EXTERNA": 13, "ABRE CONTADO": 12, "ÚLTIMO DÍA CONTADO": 12, "CONTACTADO": 11,
                 "FECHA CONTACTO": 12, "RESULTADO": 22, "NOTAS": 34, "ASEGURADORA": 12, "PÓLIZA ACTUAL": 17,
                 "PRIMA ANUAL ACTUAL": 14, "VEHÍCULO": 34, "SERIE": 20, "FOLIO CRÉDITO": 11, "MUNICIPIO": 18,
                 "DIRECCIÓN": 50, "PRIMERA OPORTUNIDAD": 13, "FIN DEL CRÉDITO": 12}
     ultc = tabla(wc, HDR, cc, anchos_c, filas_c,
-                 fechas=("PRÓXIMA FECHA", "SIGUIENTE ANIVERSARIO", "LLAMAR DESDE", "ÚLTIMO DÍA PÓLIZA EXTERNA", "ABRE CONTADO",
-                         "ÚLTIMO DÍA CONTADO", "FECHA CONTACTO", "PRIMERA OPORTUNIDAD", "FIN DEL CRÉDITO"),
+                 fechas=("PRÓXIMA FECHA", "SIGUIENTE ANIVERSARIO", "LLAMAR DESDE", "ÚLTIMO DÍA PÓLIZA EXTERNA", "OPORTUNIDAD 0 EXTERNA",
+                         "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "FECHA CONTACTO", "PRIMERA OPORTUNIDAD", "FIN DEL CRÉDITO"),
                  texto=("TELÉFONO", "SERIE", "PÓLIZA ACTUAL", "FOLIO CRÉDITO"),
                  centro=("DÍAS QUE QUEDAN", "OPORTUNIDAD", "ASEGURADORA", "CONTACTADO", "TIPO DE OPORTUNIDAD"),
                  moneda=("PRIMA ANUAL ACTUAL",),
@@ -993,7 +998,7 @@ def guardar_excel(filas, errores, salida):
     for e, _, fondo, letra in ESTATUS_LISTA:
         wc.conditional_formatting.add(f"A{HDR + 1}:C{ultc}", FormulaRule(
             formula=[f'$A{HDR + 1}="{e}"'], fill=relleno(fondo), font=Font(color=letra, bold=True)))
-    for col, color in (("ÚLTIMO DÍA PÓLIZA EXTERNA", "FFC7CE"), ("ÚLTIMO DÍA CONTADO", "FFEB9C")):
+    for col, color in (("ÚLTIMO DÍA PÓLIZA EXTERNA", "FFC7CE"), ("OPORTUNIDAD 0 EXTERNA", "F4B183"), ("ÚLTIMO DÍA CONTADO", "FFEB9C")):
         for c in wc[X[col]][HDR:]:
             c.fill = relleno(color)
     dv_si = DataValidation(type="list", formula1='"Sí,No"', allow_blank=True)
@@ -1010,7 +1015,8 @@ def guardar_excel(filas, errores, salida):
         c.font = Font(name="Arial", size=9, bold=True, color=letra)
         c.fill = relleno(fondo)
         col += 3
-    wc["A4"] = ("Regla: póliza externa hasta 45 días antes del aniversario (después se cierra) · "
+    wc["A4"] = ("Regla: póliza externa ideal hasta 45 días antes del aniversario; de 44 a 39 días es la última oportunidad "
+                "(cada día menos probable) y a los 38 días ya no se acepta · "
                 "contado desde 30 días antes hasta el día anterior · llamar al menos 7 días antes del límite de externa · "
                 "al terminar el crédito el auto es del cliente y puede contratar el seguro que quiera.")
     wc["A4"].font = Font(name="Arial", size=9, italic=True, color="595959")

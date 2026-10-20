@@ -12,13 +12,14 @@ Con ellas se calcula el plazo y **todas las oportunidades**:
 | Días antes del aniversario | Estatus | Qué hacer |
 |---|---|---|
 | Más de 52 | PRÓXIMO | Esperar |
-| 52 a 45 | LLAMAR YA · PÓLIZA EXTERNA | Cerrar la externa antes del día 45 (después se cierra) |
-| 44 a 31 | EXTERNA CERRADA · ESPERAR CONTADO | Recordarle que pague de contado |
+| 52 a 45 | LLAMAR YA · PÓLIZA EXTERNA | Cerrar la externa antes del día 45 (límite ideal) |
+| 44 a 39 | ÚLTIMA OPORTUNIDAD · EXTERNA | Llamar hoy: cada día es menos probable que la acepten |
+| 38 a 31 | EXTERNA CERRADA · ESPERAR CONTADO | Oportunidad 0 de externa; recordarle que pague de contado |
 | 30 a 1 | VENTANA DE CONTADO ABIERTA | Que pague de contado antes del día anterior |
 | Último año | PRÓXIMO / LLAMAR YA · TERMINA SU CRÉDITO | Ofrecerle seguro: el auto será suyo |
 | Después del fin | CRÉDITO TERMINADO · CLIENTE LIBRE | Ofrecer seguro sin restricciones del contrato |
 
-Los días (45 / 30 / 7) se ajustan en la app.
+Los días (45 / 38 / 30 / 7) se ajustan en la app.
 
 ## Uso
 

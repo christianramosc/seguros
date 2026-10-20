@@ -7,7 +7,7 @@ Click, columna Impresión) y/o el Excel Polizas_extraidas.xlsx; los datos de cli
 guardan en el repo ni en el servidor). El seguimiento se descarga en el mismo Excel.
 
 Reglas (días naturales antes de cada aniversario de la póliza):
-  · póliza externa: a más tardar 45 días antes (después se cierra)
+  · póliza externa: ideal a más tardar 45 días antes; de 44 a 39 última oportunidad; a los 38 ya no
   · pago de contado: desde 30 días antes hasta el día anterior
   · llamar al menos 7 días antes del límite de externa
   · al terminar el crédito el auto es del cliente: puede contratar el seguro que quiera.
@@ -141,12 +141,16 @@ if st.session_state.get("pol_err"):
         st.dataframe(pd.DataFrame(st.session_state["pol_err"], columns=["Archivo", "Motivo"]), hide_index=True)
 
 with st.expander("Reglas", icon=":material/tune:"):
-    r1, r2, r3 = st.columns(3)
+    r1, r4, r2, r3 = st.columns(4)
     reglas = dict(
-        externa=r1.number_input("Último día póliza externa (días antes del aniversario)", 1, 120, ps.REGLAS["externa"]),
+        externa=r1.number_input("Límite ideal póliza externa (días antes del aniversario)", 1, 120, ps.REGLAS["externa"]),
+        cero=r4.number_input("Oportunidad 0 de externa (días antes)", 1, 120, ps.REGLAS["cero"],
+                             help="Desde este día ya no se acepta la póliza externa. Entre el límite ideal y este día "
+                                  "es la última oportunidad: cada día es menos probable."),
         contado=r2.number_input("Abre ventana de contado (días antes)", 1, 120, ps.REGLAS["contado"]),
         aviso=r3.number_input("Llamar N días antes del límite de externa", 0, 60, ps.REGLAS["aviso"]))
-    st.caption("Póliza externa hasta 45 días antes del aniversario (después se cierra) · contado desde 30 días antes "
+    st.caption("Póliza externa ideal hasta 45 días antes del aniversario; de 44 a 39 es la última oportunidad (cada día "
+               "menos probable) y a los 38 ya no se acepta · contado desde 30 días antes "
                "hasta el día anterior · al terminar el crédito el auto es del cliente y puede contratar el seguro que "
                "quiera.")
 
@@ -158,7 +162,7 @@ cierres = df["RESULTADO"].isin(ps.CIERRES).sum()
 
 k = st.columns(5)
 _pc = ps.para_contactar(df, hoy)
-_ext = int(_pc["ESTATUS"].isin([ps.LLAMAR_EXT, ps.ADELANTAR]).sum())
+_ext = int(_pc["ESTATUS"].isin([ps.LLAMAR_EXT, ps.ULTIMA, ps.ADELANTAR]).sum())
 _fin = int(_pc["ESTATUS"].isin([ps.FIN_LLAMAR, ps.ADELANTAR_FIN]).sum())
 tarjeta(k[0], "call", "Llamar ya", _ext + _fin,
            f"{_ext} póliza externa · {_fin} fin de crédito (incluye lo que queda del mes)", "#9C0006")
@@ -178,10 +182,10 @@ if st.session_state.get("pol_guardado"):
                   " · se conserva mientras la app esté activa; para guardarlo siempre, configura Drive (README)"))
 
 COLS_HOY = ["ESTATUS", "CLIENTE", "TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD", "LLAMAR DESDE",
-            "ÚLTIMO DÍA EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "QUÉ HACER", "ASEGURADORA",
+            "ÚLTIMO DÍA EXTERNA", "OPORTUNIDAD 0 EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "QUÉ HACER", "ASEGURADORA",
             "PRIMA ANUAL ACTUAL", "CORREO", "VEHÍCULO", "FOLIO CRÉDITO", "MUNICIPIO"]
 CONF = {c: st.column_config.DateColumn(c, format="DD/MM/YYYY") for c in
-        ["PRÓXIMA FECHA", "LLAMAR DESDE", "ÚLTIMO DÍA EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "FECHA",
+        ["PRÓXIMA FECHA", "LLAMAR DESDE", "ÚLTIMO DÍA EXTERNA", "OPORTUNIDAD 0 EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "FECHA",
          "FECHA CONTACTO", "FIN DEL CRÉDITO"]}
 CONF["PRIMA ANUAL ACTUAL"] = st.column_config.NumberColumn("PRIMA ANUAL", format="dollar")
 
