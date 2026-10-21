@@ -46,10 +46,29 @@ teléfono. Un Excel anterior sin la columna se actualiza solo al subirlo.
 
 Aseguradoras reconocidas: GNP, Quálitas, Chubb, HDI y Seguros Inbursa.
 
+## Mejor oferta MG (pestaña de arriba)
+
+Eliges el auto del boletín de MG Financial Services, el pago inicial del cliente, el seguro de contado (opcional) y
+el plazo. Compara todas las ofertas (Tasa Baja 0% CXA, Tasa Baja 2% CXA, Lanzamiento 8.99%, Estándar 13.74%,
+Estándar 17.74% y Especial 12.09%), aplica el bono a tasa, al enganche o al precio, y muestra:
+
+- **Ranking** por lo que paga el cliente después del pago inicial (CXA + mensualidades) y el seguro máximo que
+  permite cada oferta.
+- **Seguro**: qué oferta es la ideal según lo que cueste el seguro de contado.
+- **Por plazo**: mensualidades de todas las ofertas en 12 a 72 meses y la mejor de cada plazo.
+- **PDF del análisis** para descargar.
+
+Mensualidades sin seguro, con IVA sobre intereses y pagos fijos. **Cada mes** actualiza en `oferta_mg.py`:
+`BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche sistema y tasas bajas) y `CURVAS`.
+
 ## Archivos
 
 ```
-streamlit_app.py      # la app (contraseña, carga, pestañas, descargas)
+streamlit_app.py      # entrada: contraseña y pestañas de arriba (Pólizas · Mejor oferta MG)
+pag_polizas.py        # página Pólizas (carga, pestañas, descargas)
+pag_oferta.py         # página Mejor oferta MG
+oferta_mg.py          # catálogo del boletín, cálculo de ofertas y PDF del análisis
+ui.py                 # estilos y tarjetas compartidas
 seguimiento.py        # estatus por fecha, proyección por mes, seguimiento en el Excel y PDF
 polizas.py            # lee los PDF de pólizas y arma el Excel (también corre suelto en Colab)
 cotizaciones.py       # lee las cotizaciones de póliza externa y calcula la más barata
