@@ -24,6 +24,7 @@ import tempfile
 
 import pandas as pd
 
+import cotizaciones
 import polizas as pz
 
 REGLAS = dict(externa=pz.DIAS_POLIZA_EXTERNA, contado=pz.DIAS_PAGO_CONTADO, aviso=pz.DIAS_AVISO_PREVIO,
@@ -123,9 +124,14 @@ def leer_contacto(excel_bytes):
     for c, v in extra.items():
         if c not in df.columns:
             df[c] = v
+    if cotizaciones.HOJA in xl.sheet_names:               # cotizaciones de póliza externa guardadas en el Excel
+        cot = cotizaciones.leer(excel_bytes)
+        if cot is not None:
+            df["PRIMA ANUAL ACTUAL"] = pd.to_numeric(df.get("PRIMA ANUAL ACTUAL"), errors="coerce")
+            df = cotizaciones.agregar(df, cot)
     keep = ["CLIENTE", "TELÉFONO", "NOTA TELÉFONO", "CORREO", "ASEGURADORA", "PÓLIZA ACTUAL", "PRIMA ANUAL ACTUAL", "VEHÍCULO",
             "SERIE", "MOTOR", "RFC", "FOLIO CRÉDITO", "MUNICIPIO", "DIRECCIÓN", "CP", "PRIMERA OPORTUNIDAD",
-            "FIN DEL CRÉDITO"] + COLS_SEG
+            "FIN DEL CRÉDITO"] + COLS_SEG + cotizaciones.COLS + ["PRECIOS EXTERNA"]
     return df[[c for c in keep if c in df.columns]].reset_index(drop=True)
 
 
@@ -410,7 +416,8 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
     from xml.sax.saxutils import escape as _e
 
     NAVY, TINTA, TINTA_2, TINTA_3, LINEA = "#12305C", "#1B2A41", "#5B6B82", "#8A96A8", "#E3E8EF"
-    NARANJA = "#C55A11"
+    NARANJA, VERDE, FONDO_VERDE = "#C55A11", "#2E7D32", "#E2EFDA"
+    con_cot = "EXTERNA MÁS BARATA" in df_hoy.columns and df_hoy["EXTERNA MÁS BARATA"].notna().any()
     base_estilo = dict(fontName="Helvetica", textColor=colors.HexColor(TINTA))
     st = dict(
         h2=ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=14, leading=18, textColor=colors.HexColor(NAVY),
@@ -458,9 +465,35 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
         return "" if v is None or (isinstance(v, float) and pd.isna(v)) or str(v).strip() in ("nan", "NaT") \
             else str(v).strip().removesuffix(".0")
 
+    def num(v):
+        try:
+            f = float(v)
+            return f if f == f else None
+        except (TypeError, ValueError):
+            return None
+
+    def externa(r):
+        """La póliza externa más barata y cuánto se ahorra contra lo que paga hoy."""
+        e = num(r.get("EXTERNA MÁS BARATA"))
+        if not e:
+            return f'<font color="{TINTA_3}" size="7">Sin cotizar</font>'
+        a = num(r.get("AHORRO EXTERNA"))
+        linea = [f"<b>${e:,.0f}</b> {_e(txt(r.get('ASEGURADORA EXTERNA')))}"]
+        if a is not None:
+            linea.append(f'<font color="{VERDE}" size="7">Ahorra ${a:,.0f}</font>' if a > 0 else
+                         f'<font color="{TINTA_2}" size="7">Su póliza es ${-a:,.0f} más barata</font>')
+        revisar = txt(r.get("NOTA COTIZACIÓN")).split("revisa coberturas:")[-1] \
+            if "revisa coberturas:" in txt(r.get("NOTA COTIZACIÓN")) else ""
+        cia = txt(r.get("ASEGURADORA EXTERNA")).split("/")[0]
+        if cia and any(x.strip().upper().startswith(cia) for x in revisar.split(";")[0].split(",")):
+            linea.append(f'<font color="{NARANJA}" size="6.5">Revisa coberturas</font>')
+        return "<br/>".join(linea)
+
     def compuesta(c, r):
         """Celdas con varios datos del cliente en renglones: nombre+RFC, vehículo+serie+motor, dirección+CP."""
         gris = f'<font color="{TINTA_2}" size="7">'
+        if c == "PÓLIZA EXTERNA":
+            return Paragraph(externa(r), st["celda"])
         if c == "NOMBRE":
             linea = [f"<b>{_e(txt(r.get('CLIENTE')))}</b>"]
             if txt(r.get("RFC")):
@@ -486,7 +519,7 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
         for i, (_, r) in enumerate(df.iterrows(), start=1):
             fila = []
             for c in cols:
-                if c in ("NOMBRE", "DATOS DEL VEHÍCULO", "DIRECCIÓN"):
+                if c in ("NOMBRE", "DATOS DEL VEHÍCULO", "DIRECCIÓN", "PÓLIZA EXTERNA"):
                     fila.append(compuesta(c, r))
                     continue
                 if c == "TELÉFONO":   # teléfono y, abajo en naranja, la nota (p. ej. qué revisar en BlueService)
@@ -511,6 +544,63 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
         t.setStyle(TableStyle(estilos))
         return t
 
+    def comparativa(df):
+        """Sección: póliza actual contra las cotizaciones de póliza externa, del mayor ahorro al menor."""
+        from reportlab.platypus import PageBreak
+        import statistics
+        d = df[df["EXTERNA MÁS BARATA"].map(lambda v: bool(num(v)))].copy()
+        d["_a"] = d["AHORRO EXTERNA"].map(lambda v: num(v) if num(v) is not None else -1e9)
+        d = d.sort_values("_a", ascending=False)
+        grupos = list(cotizaciones.GRUPOS.values())
+        ahorran = d[d["_a"] > 0]
+        fecha = txt(d["FECHA COTIZACIÓN"].dropna().iloc[0]) if d["FECHA COTIZACIÓN"].notna().any() else ""
+        out = [PageBreak(), Paragraph("Comparativa con pólizas externas", st["h2"]),
+               P(f"{len(d)} clientes cotizados" + (f" el {fecha}" if fecha else "") + " (Amplia, 1 año, contado, valor "
+                 f"comercial) · {len(ahorran)} pagarían menos con la más barata · ahorro anual de esos "
+                 f"${ahorran['_a'].sum():,.0f} · prima actual = prima anual de su póliza (promedio)", "sub"),
+               Spacer(1, 4)]
+        cols = ["CLIENTE", "PÓLIZA ACTUAL"] + grupos + ["MÁS BARATA", "AHORRO", "VALOR FACTURA", "NOTAS"]
+        anchos = [.16, .085] + [.062] * len(grupos) + [.085, .075, .07, .153]
+        filas = [[P(c, "enc") for c in cols]]
+        estilos = [("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.HexColor(NAVY)),
+                   ("LINEBELOW", (0, 1), (-1, -1), 0.3, colors.HexColor(LINEA)),
+                   ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                   ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                   ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3)]
+        gris = f'<font color="{TINTA_2}" size="7">'
+        for i, (_, r) in enumerate(d.iterrows(), start=1):
+            precios = r.get("PRECIOS EXTERNA") if isinstance(r.get("PRECIOS EXTERNA"), dict) else {}
+            med = statistics.median(precios.values()) if precios else 0
+            actual, a = num(r.get("PRIMA ANUAL ACTUAL")), num(r.get("AHORRO EXTERNA"))
+            fila = [Paragraph(f"<b>{_e(txt(r.get('CLIENTE')))}</b>" + (f"<br/>{gris}{_e(telefono(r.get('TELÉFONO')))}</font>"
+                                                                        if telefono(r.get("TELÉFONO")) else ""), st["celda"]),
+                    Paragraph((f"${actual:,.0f}" if actual else "—") + f"<br/>{gris}{_e(txt(r.get('ASEGURADORA')))}</font>",
+                              st["celda"])]
+            for j, g in enumerate(grupos, start=2):
+                v = precios.get(g)
+                if v and med and v > 2 * med:
+                    fila.append(Paragraph(f'<font color="{NARANJA}">${v:,.0f}</font>', st["celda"]))
+                else:
+                    fila.append(P(f"${v:,.0f}" if v else "—"))
+                if g == r.get("ASEGURADORA EXTERNA"):
+                    estilos.append(("BACKGROUND", (j, i), (j, i), colors.HexColor(FONDO_VERDE)))
+            fila.append(Paragraph(f"<b>${num(r['EXTERNA MÁS BARATA']):,.0f}</b><br/>{gris}"
+                                  f"{_e(txt(r.get('ASEGURADORA EXTERNA')))}</font>", st["celda"]))
+            fila.append(Paragraph(f'<font color="{VERDE}"><b>${a:,.0f}</b></font>' if a and a > 0 else
+                                  (f'{gris}Actual más barata (${-a:,.0f})</font>' if a is not None else "—"), st["celda"]))
+            vf = num(r.get("EXTERNA VF MÁS BARATA"))
+            fila.append(P(f"${vf:,.0f}" if vf else "—"))
+            fila.append(Paragraph(f'<font color="{NARANJA}" size="6.5">{_e(txt(r.get("NOTA COTIZACIÓN")))}</font>',
+                                  st["chico"]))
+            filas.append(fila)
+        t = Table(filas, colWidths=[util * x for x in anchos], repeatRows=1)
+        t.setStyle(TableStyle(estilos))
+        out += [t, Spacer(1, 6),
+                P("En verde, la aseguradora más barata de cada cliente. En naranja, precios fuera de rango o notas que "
+                  "revisar. ABA/CHUBB es la más barata de sus tarifas. Valor factura solo cambia el precio en autos "
+                  "2025-2026. Antes de ofrecer una póliza, confirma coberturas y deducibles en el cotizador.", "sub")]
+        return out
+
     MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
              "noviembre", "diciembre"]
     el = [Paragraph("Para contactar ya", st["h2"])]
@@ -520,9 +610,15 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
     else:
         el.append(P(f"{len(urg)} clientes · incluye a los que les toca llamar en lo que queda de "
                     f"{MESES[hoy.month - 1]}: su póliza externa sigue abierta, así que puedes adelantarte", "sub"))
-        el.append(tabla(urg, ["ESTATUS", "NOMBRE", "TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD",
-                              "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
-                        [.10, .15, .105, .095, .072, .05, .075, .058, .16, .135], "ESTATUS"))
+        if con_cot:
+            el.append(tabla(urg, ["ESTATUS", "NOMBRE", "TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD",
+                                  "ASEGURADORA", "PRIMA ANUAL ACTUAL", "PÓLIZA EXTERNA", "DATOS DEL VEHÍCULO",
+                                  "DIRECCIÓN"],
+                            [.095, .14, .10, .085, .068, .045, .07, .058, .10, .135, .104], "ESTATUS"))
+        else:
+            el.append(tabla(urg, ["ESTATUS", "NOMBRE", "TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD",
+                                  "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
+                            [.10, .15, .105, .095, .072, .05, .075, .058, .16, .135], "ESTATUS"))
     esp = df_hoy[df_hoy["ESTATUS"] == EXT_CERRADA].sort_values("ABRE CONTADO")
     if not esp.empty:
         el += [Spacer(1, 14), Paragraph("Externa cerrada · llamar cuando abra el contado", st["h2"]),
@@ -546,5 +642,7 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
         el.append(tabla(df_periodo, ["LLAMAR DESDE", "FECHA", "TIPO", "OPORTUNIDAD", "NOMBRE", "TELÉFONO",
                                      "CORREO", "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
                         [.072, .072, .07, .05, .145, .105, .105, .075, .058, .148, .10]))
+    if con_cot:
+        el += comparativa(df_hoy)
     doc.build(el)
     return buf.getvalue()
