@@ -34,6 +34,16 @@ Los días (45 / 38 / 30 / 7) se ajustan en la app.
 
 La app **no guarda datos de clientes**: descarga el Excel al terminar y súbelo la próxima vez.
 
+### Teléfonos y NOTA TELÉFONO
+
+Muchas pólizas no traen teléfono; se completan a mano en el Excel (por ejemplo, buscando el VIN en BlueService).
+La columna **NOTA TELÉFONO** (hojas *Contacto* y *Base de datos*, celda amarilla editable) guarda lo que hay que
+revisar de ese número: *sin órdenes de servicio en BlueService*, *número incompleto*, *el VIN está a nombre de otra
+persona*… La nota aparece en la app y en el PDF (en naranja, debajo del teléfono).
+
+Si vuelves a subir PDFs junto con el Excel, el teléfono y la nota que ya tenías se conservan cuando el PDF no trae
+teléfono. Un Excel anterior sin la columna se actualiza solo al subirlo.
+
 Aseguradoras reconocidas: GNP, Quálitas, Chubb, HDI y Seguros Inbursa.
 
 ## Archivos

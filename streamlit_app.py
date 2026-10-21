@@ -181,7 +181,7 @@ if st.session_state.get("pol_guardado"):
                + ("" if almacen.drive_configurado() else
                   " · se conserva mientras la app esté activa; para guardarlo siempre, configura Drive (README)"))
 
-COLS_HOY = ["ESTATUS", "CLIENTE", "TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD", "LLAMAR DESDE",
+COLS_HOY = ["ESTATUS", "CLIENTE", "TELÉFONO", "NOTA TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD", "LLAMAR DESDE",
             "ÚLTIMO DÍA EXTERNA", "OPORTUNIDAD 0 EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "QUÉ HACER", "ASEGURADORA",
             "PRIMA ANUAL ACTUAL", "CORREO", "VEHÍCULO", "FOLIO CRÉDITO", "MUNICIPIO"]
 CONF = {c: st.column_config.DateColumn(c, format="DD/MM/YYYY") for c in
@@ -259,7 +259,7 @@ with t_mes:
         a.metric("Oportunidades", len(del_mes))
         b.metric("Fin de crédito", int((del_mes["TIPO"] == "Fin de crédito").sum()))
         c.metric("Prima anual en juego", f"${del_mes['PRIMA ANUAL ACTUAL'].sum():,.0f}")
-        ver(del_mes, ["LLAMAR DESDE", "FECHA", "TIPO", "OPORTUNIDAD", "CLIENTE", "TELÉFONO", "CORREO", "ASEGURADORA",
+        ver(del_mes, ["LLAMAR DESDE", "FECHA", "TIPO", "OPORTUNIDAD", "CLIENTE", "TELÉFONO", "NOTA TELÉFONO", "CORREO", "ASEGURADORA",
                       "PRIMA ANUAL ACTUAL", "VEHÍCULO"])
         st.session_state["pol_pdf_mes"] = (del_mes, etiqueta(m))
 
@@ -287,12 +287,12 @@ with t_seg:
                "datos de clientes) y la próxima vez súbelo en «Excel anterior».")
     solo = st.toggle("Solo los que hay que contactar ahora", value=True, key="pol_seg_solo")
     ed = df if not solo else df[df["ESTATUS"].isin(ps.URGENTES + [ps.EXT_CERRADA, ps.CONTACTADO])]
-    cols_ed = ["ESTATUS", "CLIENTE", "TELÉFONO", "PRÓXIMA FECHA", "CIERRA EN"] + ps.COLS_SEG + ["SERIE"]
+    cols_ed = ["ESTATUS", "CLIENTE", "TELÉFONO", "NOTA TELÉFONO", "PRÓXIMA FECHA", "CIERRA EN"] + ps.COLS_SEG + ["SERIE"]
     datos = ed[cols_ed].copy()
     datos["FECHA CONTACTO"] = pd.to_datetime(datos["FECHA CONTACTO"], errors="coerce")
     editado = st.data_editor(
         datos, hide_index=True, width="stretch", key="pol_editor",
-        disabled=["ESTATUS", "CLIENTE", "TELÉFONO", "PRÓXIMA FECHA", "CIERRA EN", "SERIE"],
+        disabled=["ESTATUS", "CLIENTE", "TELÉFONO", "NOTA TELÉFONO", "PRÓXIMA FECHA", "CIERRA EN", "SERIE"],
         column_config={**CONF,
                        "CONTACTADO": st.column_config.SelectboxColumn("CONTACTADO", options=["Sí", "No"]),
                        "FECHA CONTACTO": st.column_config.DateColumn("FECHA CONTACTO", format="DD/MM/YYYY"),

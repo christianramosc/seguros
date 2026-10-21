@@ -797,8 +797,10 @@ ESTATUS_LISTA = [
 
 
 def seguimiento_previo(salida):
-    """Si el Excel ya existe, recupera lo capturado a mano en la hoja Contacto
-    (Contactado, Fecha, Resultado, Notas) por número de serie."""
+    """Si el Excel ya existe, recupera por número de serie lo capturado a mano en la hoja Contacto:
+    {serie: {"seg": (Contactado, Fecha, Resultado, Notas), "tel": teléfono, "nota": nota del teléfono}}.
+    El teléfono y su nota sirven cuando el PDF de la póliza no trae teléfono (p. ej. los que se buscaron en
+    BlueService)."""
     previo = {}
     if not os.path.exists(salida):
         return previo
@@ -816,13 +818,22 @@ def seguimiento_previo(salida):
         if not all(h in hdr for h in need):
             return previo
         ix = {h: hdr.index(h) for h in need}
+        texto = lambda row, h: (str(row[hdr.index(h)]).strip().removesuffix(".0")
+                                if h in hdr and row[hdr.index(h)] not in (None, "") else "")
         for row in ws.iter_rows(min_row=fila_hdr + 1, values_only=True):
             datos = tuple(row[ix[h]] for h in need[1:])
-            if row[ix["SERIE"]] and any(datos):
-                previo[row[ix["SERIE"]]] = datos
+            tel, nota = texto(row, "TELÉFONO"), texto(row, "NOTA TELÉFONO")
+            if row[ix["SERIE"]] and (any(datos) or tel or nota):
+                previo[str(row[ix["SERIE"]]).strip()] = {"seg": datos, "tel": tel, "nota": nota}
     except Exception as e:
         print(f"  Aviso: no se pudo recuperar el seguimiento anterior ({e})")
     return previo
+
+
+def telefono_y_nota(u, previo):
+    """Teléfono del PDF (o, si no trae, el que ya estaba en el Excel) y la nota del teléfono."""
+    p = previo.get(str(u.get("SERIE") or "").strip(), {})
+    return u.get("TELÉFONO") or p.get("tel", ""), u.get("NOTA TELÉFONO") or p.get("nota", "")
 
 
 def _roles(c):
@@ -913,7 +924,7 @@ def guardar_excel(filas, errores, salida):
         wc[cv].alignment = Alignment(horizontal="center")
     PE, PC, PA, P0 = "$D$2", "$H$2", "$K$2", "$O$2"
 
-    cc = ["ESTATUS HOY", "QUÉ HACER", "DÍAS QUE QUEDAN", "CLIENTE", "TELÉFONO", "CORREO",
+    cc = ["ESTATUS HOY", "QUÉ HACER", "DÍAS QUE QUEDAN", "CLIENTE", "TELÉFONO", "NOTA TELÉFONO", "CORREO",
           "PRÓXIMA FECHA", "OPORTUNIDAD", "LLAMAR DESDE", "ÚLTIMO DÍA PÓLIZA EXTERNA",
           "OPORTUNIDAD 0 EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "CONTACTADO", "FECHA CONTACTO", "RESULTADO", "NOTAS",
           "ASEGURADORA", "PÓLIZA ACTUAL", "PRIMA ANUAL ACTUAL", "VEHÍCULO", "SERIE", "FOLIO CRÉDITO",
@@ -964,18 +975,19 @@ def guardar_excel(filas, errores, salida):
         dias = (f'=IF({T}="CRÉDITO TERMINADO","",IF({T}="FIN DE CRÉDITO",{A}-TODAY(),'
                 f'IF(TODAY()>={A}-{P0},"Externa cerrada",IF(TODAY()>{A}-{PE},{A}-{P0}-TODAY(),{A}-{PE}-TODAY()))))')
         solo_aniv = lambda fx: f'=IF({T}="ANIVERSARIO",{fx},"No aplica")'
-        seg = previo.get(u.get("SERIE"), (None, None, None, None))
+        seg = previo.get(str(u.get("SERIE") or "").strip(), {}).get("seg", (None, None, None, None))
         recuperados += any(seg)
+        tel, nota_tel = telefono_y_nota(u, previo)
         filas_c.append([
             estatus, que, dias,
-            u.get("NOMBRE", ""), u.get("TELÉFONO", ""), u.get("CORREO", ""),
+            u.get("NOMBRE", ""), tel, nota_tel, u.get("CORREO", ""),
             prox, oport, f"={A}-{PE}-{PA}", solo_aniv(f"{A}-{PE}"), solo_aniv(f"{A}-{P0}"), solo_aniv(f"{A}-{PC}"), solo_aniv(f"{A}-1"),
             *seg,
             actual.get("ASEGURADORA", ""), actual.get("NO. PÓLIZA", ""), actual.get("PRIMA ANUAL EST."),
             limpiar(f"{u.get('DATOS DE VEHÍCULO', '')} {u.get('AÑO MODELO', '')}"), u.get("SERIE", ""),
             u.get("FOLIO CRÉDITO", ""), u.get("MUNICIPIO", ""), u.get("DIRECCIÓN", ""), tipo, sig, base, fin])
     anchos_c = {"ESTATUS HOY": 34, "QUÉ HACER": 48, "DÍAS QUE QUEDAN": 12, "CLIENTE": 32,
-                "TELÉFONO": 13, "CORREO": 22, "PRÓXIMA FECHA": 13, "TIPO DE OPORTUNIDAD": 18,
+                "TELÉFONO": 13, "NOTA TELÉFONO": 30, "CORREO": 22, "PRÓXIMA FECHA": 13, "TIPO DE OPORTUNIDAD": 18,
                 "SIGUIENTE ANIVERSARIO": 13, "OPORTUNIDAD": 11, "LLAMAR DESDE": 12,
                 "ÚLTIMO DÍA PÓLIZA EXTERNA": 13, "OPORTUNIDAD 0 EXTERNA": 13, "ABRE CONTADO": 12, "ÚLTIMO DÍA CONTADO": 12, "CONTACTADO": 11,
                 "FECHA CONTACTO": 12, "RESULTADO": 22, "NOTAS": 34, "ASEGURADORA": 12, "PÓLIZA ACTUAL": 17,
@@ -987,7 +999,10 @@ def guardar_excel(filas, errores, salida):
                  texto=("TELÉFONO", "SERIE", "PÓLIZA ACTUAL", "FOLIO CRÉDITO"),
                  centro=("DÍAS QUE QUEDAN", "OPORTUNIDAD", "ASEGURADORA", "CONTACTADO", "TIPO DE OPORTUNIDAD"),
                  moneda=("PRIMA ANUAL ACTUAL",),
-                 captura=("CONTACTADO", "FECHA CONTACTO", "RESULTADO", "NOTAS"))
+                 captura=("CONTACTADO", "FECHA CONTACTO", "RESULTADO", "NOTAS", "NOTA TELÉFONO"))
+    for c in wc[X["NOTA TELÉFONO"]][HDR:]:      # notas en naranja: hay algo que revisar antes de llamar
+        c.font = Font(name="Arial", size=9, color="C55A11")
+        c.alignment = Alignment(vertical="center", wrap_text=True)
     for c in wc["A"][HDR:]:
         c.font = Font(name="Arial", size=10, bold=True)
     for c in wc[X["DÍAS QUE QUEDAN"]][HDR:]:
@@ -1023,7 +1038,7 @@ def guardar_excel(filas, errores, salida):
     wc.freeze_panes = wc.cell(HDR + 1, 5)
 
     # ======================= Hoja BASE DE DATOS =======================
-    cb = ["FOLIO CRÉDITO", "CLIENTE", "TIPO PERSONA", "RFC", "EDAD", "SEXO", "TELÉFONO", "CORREO",
+    cb = ["FOLIO CRÉDITO", "CLIENTE", "TIPO PERSONA", "RFC", "EDAD", "SEXO", "TELÉFONO", "NOTA TELÉFONO", "CORREO",
           "DIRECCIÓN", "MUNICIPIO", "ESTADO", "CP",
           "VEHÍCULO", "MODELO MG", "AÑO MODELO", "SERIE", "MOTOR",
           "ASEGURADORA", "PAQUETE", "SUMA ASEGURADA DM", "DEDUCIBLE DM", "DEDUCIBLE RT", "RC TERCEROS",
@@ -1042,7 +1057,7 @@ def guardar_excel(filas, errores, salida):
         datos.append([
             u.get("FOLIO CRÉDITO", ""), u.get("NOMBRE", ""), u.get("TIPO PERSONA", ""), u.get("RFC", ""),
             f'=DATEDIF(DATE({nac.year},{nac.month},{nac.day}),TODAY(),"y")' if nac else "",
-            u.get("SEXO", ""), u.get("TELÉFONO", ""), u.get("CORREO", ""),
+            u.get("SEXO", ""), *telefono_y_nota(u, previo), u.get("CORREO", ""),
             u.get("DIRECCIÓN", ""), u.get("MUNICIPIO", ""), u.get("ESTADO", ""), u.get("CP", ""),
             u.get("DATOS DE VEHÍCULO", ""), u.get("MODELO MG", ""), u.get("AÑO MODELO", ""), u.get("SERIE", ""),
             u.get("MOTOR", ""),
@@ -1061,7 +1076,7 @@ def guardar_excel(filas, errores, salida):
             u.get("AGENCIA", "") or (p1 or {}).get("AGENCIA", ""),
             " | ".join(sorted({r.get("ARCHIVO", "") for r in c["polizas"]})), c["nota"]])
     anchos_b = {"FOLIO CRÉDITO": 11, "CLIENTE": 32, "TIPO PERSONA": 9, "RFC": 15, "EDAD": 6, "SEXO": 10,
-                "TELÉFONO": 13, "CORREO": 22, "DIRECCIÓN": 48, "MUNICIPIO": 17, "ESTADO": 11, "CP": 7,
+                "TELÉFONO": 13, "NOTA TELÉFONO": 30, "CORREO": 22, "DIRECCIÓN": 48, "MUNICIPIO": 17, "ESTADO": 11, "CP": 7,
                 "VEHÍCULO": 32, "MODELO MG": 8, "AÑO MODELO": 7, "SERIE": 20, "MOTOR": 18, "ASEGURADORA": 12,
                 "PAQUETE": 14, "SUMA ASEGURADA DM": 14, "DEDUCIBLE DM": 9, "DEDUCIBLE RT": 9, "RC TERCEROS": 14,
                 "PÓLIZA 1 (CONTADO)": 17, "P1 DESDE": 11, "P1 HASTA": 11, "PRIMA P1": 12,

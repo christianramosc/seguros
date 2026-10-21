@@ -104,8 +104,10 @@ def leer_contacto(excel_bytes):
     df = df[df["CLIENTE"].notna() & (df["CLIENTE"].astype(str).str.strip() != "")].copy()
     for c in ("PRIMERA OPORTUNIDAD", "FIN DEL CRÉDITO", "FECHA CONTACTO"):
         df[c] = df[c].map(_fecha)
-    for c in ("TELÉFONO", "CORREO", "FOLIO CRÉDITO", "SERIE", "PÓLIZA ACTUAL", "RESULTADO", "NOTAS", "CONTACTADO",
-              "MUNICIPIO", "DIRECCIÓN", "VEHÍCULO", "ASEGURADORA"):
+    if "NOTA TELÉFONO" not in df.columns:
+        df["NOTA TELÉFONO"] = ""
+    for c in ("TELÉFONO", "NOTA TELÉFONO", "CORREO", "FOLIO CRÉDITO", "SERIE", "PÓLIZA ACTUAL", "RESULTADO", "NOTAS",
+              "CONTACTADO", "MUNICIPIO", "DIRECCIÓN", "VEHÍCULO", "ASEGURADORA"):
         if c in df.columns:
             df[c] = df[c].map(lambda v: "" if pd.isna(v) else str(v).strip().removesuffix(".0"))
     df["PRIMA ANUAL ACTUAL"] = pd.to_numeric(df.get("PRIMA ANUAL ACTUAL"), errors="coerce")
@@ -121,7 +123,7 @@ def leer_contacto(excel_bytes):
     for c, v in extra.items():
         if c not in df.columns:
             df[c] = v
-    keep = ["CLIENTE", "TELÉFONO", "CORREO", "ASEGURADORA", "PÓLIZA ACTUAL", "PRIMA ANUAL ACTUAL", "VEHÍCULO",
+    keep = ["CLIENTE", "TELÉFONO", "NOTA TELÉFONO", "CORREO", "ASEGURADORA", "PÓLIZA ACTUAL", "PRIMA ANUAL ACTUAL", "VEHÍCULO",
             "SERIE", "MOTOR", "RFC", "FOLIO CRÉDITO", "MUNICIPIO", "DIRECCIÓN", "CP", "PRIMERA OPORTUNIDAD",
             "FIN DEL CRÉDITO"] + COLS_SEG
     return df[[c for c in keep if c in df.columns]].reset_index(drop=True)
@@ -147,7 +149,8 @@ def filas_de_excel(excel_bytes):
             "FOLIO CRÉDITO": limpio(r.get("FOLIO CRÉDITO")), "NOMBRE": limpio(r.get("CLIENTE")),
             "TIPO PERSONA": limpio(r.get("TIPO PERSONA")), "RFC": rfc,
             "FECHA NAC. (RFC)": pz.nacimiento_rfc(rfc) if len(rfc) == 13 else None, "SEXO": limpio(r.get("SEXO")),
-            "TELÉFONO": limpio(r.get("TELÉFONO")), "CORREO": limpio(r.get("CORREO")),
+            "TELÉFONO": limpio(r.get("TELÉFONO")), "NOTA TELÉFONO": limpio(r.get("NOTA TELÉFONO")),
+            "CORREO": limpio(r.get("CORREO")),
             "DIRECCIÓN": limpio(r.get("DIRECCIÓN")), "MUNICIPIO": limpio(r.get("MUNICIPIO")),
             "ESTADO": limpio(r.get("ESTADO")), "CP": limpio(r.get("CP")),
             "DATOS DE VEHÍCULO": limpio(r.get("VEHÍCULO")), "MODELO MG": limpio(r.get("MODELO MG")),
@@ -174,12 +177,12 @@ def filas_de_excel(excel_bytes):
 
 
 def _al_dia(excel):
-    """Si el Excel es de una versión anterior (sin la columna OPORTUNIDAD 0 EXTERNA), lo vuelve a armar con las
-    reglas actuales conservando el seguimiento capturado."""
+    """Si el Excel es de una versión anterior (sin las columnas OPORTUNIDAD 0 EXTERNA o NOTA TELÉFONO), lo vuelve
+    a armar con las reglas actuales conservando el seguimiento capturado y los teléfonos."""
     from openpyxl import load_workbook
     ws = load_workbook(io.BytesIO(excel), read_only=True)["Contacto"]
     hdr = [c.value for c in next(ws.iter_rows(min_row=HDR_CONTACTO, max_row=HDR_CONTACTO))]
-    if "OPORTUNIDAD 0 EXTERNA" in hdr:
+    if "OPORTUNIDAD 0 EXTERNA" in hdr and "NOTA TELÉFONO" in hdr:
         return excel
     with tempfile.TemporaryDirectory() as tmp:
         salida = os.path.join(tmp, "Polizas_extraidas.xlsx")
@@ -359,7 +362,8 @@ def proyeccion(base, hoy=None, meses=12, reglas=REGLAS):
                 filas.append({"MES": dt.date(llamar.year, llamar.month, 1) if llamar > hoy
                               else dt.date(hoy.year, hoy.month, 1),
                               "LLAMAR DESDE": llamar, "FECHA": fecha, "TIPO": tipo, "OPORTUNIDAD": op,
-                              "CLIENTE": f["CLIENTE"], "TELÉFONO": f["TELÉFONO"], "CORREO": f["CORREO"],
+                              "CLIENTE": f["CLIENTE"], "TELÉFONO": f["TELÉFONO"],
+                              "NOTA TELÉFONO": f.get("NOTA TELÉFONO", ""), "CORREO": f["CORREO"],
                               "ASEGURADORA": f["ASEGURADORA"], "VEHÍCULO": f["VEHÍCULO"], "SERIE": f["SERIE"],
                               "MOTOR": f.get("MOTOR", ""), "RFC": f.get("RFC", ""),
                               "DIRECCIÓN": f.get("DIRECCIÓN", ""), "CP": f.get("CP", ""),
@@ -406,6 +410,7 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
     from xml.sax.saxutils import escape as _e
 
     NAVY, TINTA, TINTA_2, TINTA_3, LINEA = "#12305C", "#1B2A41", "#5B6B82", "#8A96A8", "#E3E8EF"
+    NARANJA = "#C55A11"
     base_estilo = dict(fontName="Helvetica", textColor=colors.HexColor(TINTA))
     st = dict(
         h2=ParagraphStyle("h2", fontName="Helvetica-Bold", fontSize=14, leading=18, textColor=colors.HexColor(NAVY),
@@ -438,7 +443,8 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
                                    f"anterior · corte {hoy:%d/%m/%Y}")
         c.setFont("Helvetica", 7)
         c.setFillColor(colors.HexColor(TINTA_3))
-        c.drawString(m, 16, "MG Colima · Fuente: pólizas de Crédito Click")
+        c.drawString(m, 16, "MG Colima · Fuente: pólizas de Crédito Click · teléfonos faltantes de BlueService "
+                            "(en naranja, lo que hay que revisar antes de llamar)")
         c.drawRightString(ancho - m, 16, f"Página {c.getPageNumber()}")
         c.restoreState()
 
@@ -483,6 +489,13 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
                 if c in ("NOMBRE", "DATOS DEL VEHÍCULO", "DIRECCIÓN"):
                     fila.append(compuesta(c, r))
                     continue
+                if c == "TELÉFONO":   # teléfono y, abajo en naranja, la nota (p. ej. qué revisar en BlueService)
+                    tel, nota = telefono(r.get("TELÉFONO")), txt(r.get("NOTA TELÉFONO"))
+                    linea = [_e(tel)] if tel else []
+                    if nota:
+                        linea.append(f'<font color="{NARANJA}" size="6.5">{_e(nota)}</font>')
+                    fila.append(Paragraph("<br/>".join(linea), st["celda"]))
+                    continue
                 v = r.get(c, "")
                 if isinstance(v, dt.date):
                     v = f(v)
@@ -509,7 +522,7 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
                     f"{MESES[hoy.month - 1]}: su póliza externa sigue abierta, así que puedes adelantarte", "sub"))
         el.append(tabla(urg, ["ESTATUS", "NOMBRE", "TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD",
                               "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
-                        [.10, .15, .085, .095, .072, .05, .075, .058, .17, .145], "ESTATUS"))
+                        [.10, .15, .105, .095, .072, .05, .075, .058, .16, .135], "ESTATUS"))
     esp = df_hoy[df_hoy["ESTATUS"] == EXT_CERRADA].sort_values("ABRE CONTADO")
     if not esp.empty:
         el += [Spacer(1, 14), Paragraph("Externa cerrada · llamar cuando abra el contado", st["h2"]),
@@ -517,7 +530,7 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
                  "fecha en que abre la ventana", "sub"),
                tabla(esp, ["ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "PRÓXIMA FECHA", "OPORTUNIDAD", "NOMBRE", "TELÉFONO",
                            "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
-                     [.075, .075, .075, .05, .16, .085, .075, .058, .2, .147])]
+                     [.075, .075, .075, .05, .16, .105, .075, .058, .19, .137])]
     ya = set(urg["SERIE"]) | set(esp["SERIE"])
     total = len(df_periodo)
     df_periodo = df_periodo[~df_periodo["SERIE"].isin(ya)] if total else df_periodo
@@ -532,6 +545,6 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
                     "sub"))
         el.append(tabla(df_periodo, ["LLAMAR DESDE", "FECHA", "TIPO", "OPORTUNIDAD", "NOMBRE", "TELÉFONO",
                                      "CORREO", "ASEGURADORA", "PRIMA ANUAL ACTUAL", "DATOS DEL VEHÍCULO", "DIRECCIÓN"],
-                        [.072, .072, .07, .05, .145, .085, .105, .075, .058, .158, .11]))
+                        [.072, .072, .07, .05, .145, .105, .105, .075, .058, .148, .10]))
     doc.build(el)
     return buf.getvalue()
