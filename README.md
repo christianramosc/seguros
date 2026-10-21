@@ -52,6 +52,8 @@ Aseguradoras reconocidas: GNP, Quálitas, Chubb, HDI y Seguros Inbursa.
 streamlit_app.py      # la app (contraseña, carga, pestañas, descargas)
 seguimiento.py        # estatus por fecha, proyección por mes, seguimiento en el Excel y PDF
 polizas.py            # lee los PDF de pólizas y arma el Excel (también corre suelto en Colab)
+hoja_google.py        # copia las pólizas a la pestaña «Polizas» del Google Sheet
+almacen.py            # guarda el último Excel (servidor o Google Drive)
 packages.txt          # poppler-utils (pdftotext) para Streamlit Cloud
 ```
 
@@ -73,6 +75,14 @@ streamlit run streamlit_app.py
 
 `polizas.py` también funciona solo: pégalo en Colab, ejecuta la celda, sube los PDF/ZIP (y el Excel anterior si lo
 tienes) con el botón y se descarga el Excel.
+
+## Copia en Google Sheets (para consultar y usar en otras apps)
+
+Si en Secrets están `[gcp_service_account]` y `SEGUIMIENTO_SHEET_URL` (o `POLIZAS_SHEET_URL`), cada vez que cargas
+el Excel o das **Guardar y actualizar estatus**, la app reemplaza la pestaña **Polizas** de ese Google Sheet con una
+fila por crédito: cliente, teléfono y su nota, seguimiento, fechas y el estatus calculado ese día (columna
+`ACTUALIZADO`). Las demás pestañas no se tocan. Con los mismos secrets de `reportessaleu` se usa su mismo Sheet; desde
+esa app se lee como cualquier otra pestaña (`libro.worksheet("Polizas")`).
 
 ## Guardar el Excel para no subirlo cada vez
 
