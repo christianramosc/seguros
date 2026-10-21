@@ -27,6 +27,7 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 import almacen  # noqa: E402
+import cotizaciones  # noqa: E402
 import hoja_google  # noqa: E402
 import seguimiento as ps  # noqa: E402
 
@@ -115,20 +116,35 @@ if st.session_state.get("pol_base") is None and not st.session_state.get("pol_au
             pass
 
 with st.container(border=True):
-    c1, c2 = st.columns([3, 2])
+    c1, c2, c3 = st.columns([3, 2, 2])
     pdfs = c1.file_uploader("Pólizas (PDF o ZIP)", type=["pdf", "zip"], accept_multiple_files=True, key="pol_pdfs",
                             help="Los PDF que se descargan de Crédito Click (columna Impresión). Puedes subir varios "
                                  "o un ZIP. Si solo vas a revisar el seguimiento, basta con el Excel.")
     xls = c2.file_uploader("Excel anterior (opcional)", type=["xlsx"], key="pol_xlsx",
                            help="Polizas_extraidas.xlsx: conserva lo que ya capturaste (Contactado, Resultado, Notas) "
                                 "y, si también subes PDFs nuevos, los junta con los clientes que ya tenías.")
-    if st.button("Cargar", type="primary", disabled=not (pdfs or xls), icon=":material/upload:"):
+    cot = c3.file_uploader("Cotizaciones (opcional)", type=["xlsx"], key="pol_cot",
+                           help="Excel de cotizaciones de póliza externa (Multicotizador Istra, hoja Comparativo, con "
+                                "SERIE). Se guarda dentro del Excel de pólizas y el PDF agrega la comparativa.")
+    hay_base = st.session_state.get("pol_excel") is not None
+    if st.button("Cargar", type="primary", disabled=not (pdfs or xls or (cot and hay_base)), icon=":material/upload:"):
         with st.spinner("Leyendo pólizas…" if pdfs else "Leyendo el Excel…"):
             try:
-                base, excel, errores = ps.cargar([(f.name, f.getvalue()) for f in pdfs or []],
-                                                 xls.getvalue() if xls else None)
-                st.session_state.update(pol_base=base, pol_excel=excel, pol_err=errores,
-                                        pol_origen=f"{len(pdfs)} archivo(s) PDF/ZIP" if pdfs else xls.name)
+                if pdfs or xls:
+                    base, excel, errores = ps.cargar([(f.name, f.getvalue()) for f in pdfs or []],
+                                                     xls.getvalue() if xls else None)
+                    origen = f"{len(pdfs)} archivo(s) PDF/ZIP" if pdfs else xls.name
+                else:                                    # solo cotizaciones: se agregan al Excel que ya está abierto
+                    excel = ps.aplicar_seguimiento(st.session_state["pol_excel"], st.session_state["pol_base"])
+                    errores, origen = st.session_state.get("pol_err", []), st.session_state.get("pol_origen", "")
+                if cot:
+                    if cotizaciones.leer(cot.getvalue()) is None:
+                        raise ValueError("El Excel de cotizaciones no trae la hoja Comparativo con las columnas "
+                                         "CLIENTE y SERIE.")
+                    excel = cotizaciones.incrustar(excel, cot.getvalue())
+                    base = ps.leer_contacto(excel)
+                    origen += f" + cotizaciones ({cot.name})"
+                st.session_state.update(pol_base=base, pol_excel=excel, pol_err=errores, pol_origen=origen)
                 st.session_state.pop("pol_editor", None)
                 guardar_actual()
             except Exception as e:
@@ -191,11 +207,15 @@ if st.session_state.get("pol_sheet"):
 
 COLS_HOY = ["ESTATUS", "CLIENTE", "TELÉFONO", "NOTA TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD", "LLAMAR DESDE",
             "ÚLTIMO DÍA EXTERNA", "OPORTUNIDAD 0 EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "QUÉ HACER", "ASEGURADORA",
-            "PRIMA ANUAL ACTUAL", "CORREO", "VEHÍCULO", "FOLIO CRÉDITO", "MUNICIPIO"]
+            "PRIMA ANUAL ACTUAL", "EXTERNA MÁS BARATA", "ASEGURADORA EXTERNA", "AHORRO EXTERNA", "NOTA COTIZACIÓN",
+            "CORREO", "VEHÍCULO", "FOLIO CRÉDITO", "MUNICIPIO"]
 CONF = {c: st.column_config.DateColumn(c, format="DD/MM/YYYY") for c in
         ["PRÓXIMA FECHA", "LLAMAR DESDE", "ÚLTIMO DÍA EXTERNA", "OPORTUNIDAD 0 EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "FECHA",
          "FECHA CONTACTO", "FIN DEL CRÉDITO"]}
 CONF["PRIMA ANUAL ACTUAL"] = st.column_config.NumberColumn("PRIMA ANUAL", format="dollar")
+CONF["EXTERNA MÁS BARATA"] = st.column_config.NumberColumn("EXTERNA MÁS BARATA", format="dollar")
+CONF["AHORRO EXTERNA"] = st.column_config.NumberColumn("AHORRO EXTERNA", format="dollar",
+                                                       help="Prima anual actual menos la externa más barata")
 
 
 def con_seguimiento(base, editado):

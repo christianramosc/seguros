@@ -52,6 +52,7 @@ Aseguradoras reconocidas: GNP, Quálitas, Chubb, HDI y Seguros Inbursa.
 streamlit_app.py      # la app (contraseña, carga, pestañas, descargas)
 seguimiento.py        # estatus por fecha, proyección por mes, seguimiento en el Excel y PDF
 polizas.py            # lee los PDF de pólizas y arma el Excel (también corre suelto en Colab)
+cotizaciones.py       # lee las cotizaciones de póliza externa y calcula la más barata
 hoja_google.py        # copia las pólizas a la pestaña «Polizas» del Google Sheet
 almacen.py            # guarda el último Excel (servidor o Google Drive)
 packages.txt          # poppler-utils (pdftotext) para Streamlit Cloud
@@ -75,6 +76,14 @@ streamlit run streamlit_app.py
 
 `polizas.py` también funciona solo: pégalo en Colab, ejecuta la celda, sube los PDF/ZIP (y el Excel anterior si lo
 tienes) con el botón y se descarga el Excel.
+
+### Comparativa con pólizas externas
+
+En **Cotizaciones (opcional)** sube el Excel del Multicotizador (hoja *Comparativo*, una fila por cliente con su
+SERIE y una columna por aseguradora terminada en *(VC)* / *(VF)*). La app lo guarda dentro del Excel de pólizas
+(hoja *Cotizaciones*, se conserva aunque vuelvas a subir PDFs), muestra la externa más barata y el ahorro contra la
+prima anual actual, y el **PDF para contactar** agrega la columna *Póliza externa* y una sección *Comparativa con
+pólizas externas* ordenada del mayor ahorro al menor. Puedes subirlo solo, sobre el Excel que ya está abierto.
 
 ## Copia en Google Sheets (para consultar y usar en otras apps)
 

@@ -1098,6 +1098,24 @@ def guardar_excel(filas, errores, salida):
         wr = wb.create_sheet("Por revisar")
         tabla(wr, 1, ["ARCHIVO", "MOTIVO"], {"ARCHIVO": 45, "MOTIVO": 90}, [list(e) for e in errores])
 
+    # Cotizaciones de póliza externa que ya traía el Excel anterior: se copian tal cual
+    if os.path.exists(salida):
+        try:
+            from openpyxl import load_workbook
+            from copy import copy
+            prev = load_workbook(salida, data_only=True)
+            if "Cotizaciones" in prev.sheetnames:
+                wo, wd = prev["Cotizaciones"], wb.create_sheet("Cotizaciones")
+                for fila in wo.iter_rows():
+                    for c in fila:
+                        d = wd.cell(c.row, c.column, c.value)
+                        if c.has_style:
+                            d.font, d.fill, d.number_format = copy(c.font), copy(c.fill), c.number_format
+                for k, dim in wo.column_dimensions.items():
+                    wd.column_dimensions[k].width = dim.width
+        except Exception as e:
+            print(f"  Aviso: no se pudieron conservar las cotizaciones ({e})")
+
     wb.active = 0
     wb.save(salida)
     if recuperados:
