@@ -27,6 +27,7 @@ import pandas as pd  # noqa: E402
 import streamlit as st  # noqa: E402
 
 import almacen  # noqa: E402
+import hoja_google  # noqa: E402
 import seguimiento as ps  # noqa: E402
 
 st.set_page_config(page_title="Pólizas MG Colima", page_icon="🛡️", layout="wide")
@@ -96,6 +97,10 @@ def guardar_actual():
     """Guarda el Excel con el seguimiento actual para la próxima vez que se abra la app."""
     ok, msg = almacen.guardar(st.session_state["pol_excel"])
     st.session_state["pol_guardado"] = (ok, msg, dt.datetime.now())
+    if hoja_google.configurado():   # copia para consulta en el Google Sheet (pestaña Polizas)
+        with st.spinner("Copiando al Google Sheet…"):
+            st.session_state["pol_sheet"] = hoja_google.publicar(ps.calcular(st.session_state["pol_base"],
+                                                                            dt.date.today()))
 
 
 # al abrir: si no hay nada cargado, toma el último Excel guardado
@@ -180,6 +185,9 @@ if st.session_state.get("pol_guardado"):
     st.caption(f"{':material/cloud_done:' if ok else ':material/save:'} {msg} · {cuando:%H:%M}"
                + ("" if almacen.drive_configurado() else
                   " · se conserva mientras la app esté activa; para guardarlo siempre, configura Drive (README)"))
+if st.session_state.get("pol_sheet"):
+    ok, msg = st.session_state["pol_sheet"]
+    st.caption(f"{':material/table_chart:' if ok else ':material/warning:'} {msg}")
 
 COLS_HOY = ["ESTATUS", "CLIENTE", "TELÉFONO", "NOTA TELÉFONO", "CIERRA EN", "PRÓXIMA FECHA", "OPORTUNIDAD", "LLAMAR DESDE",
             "ÚLTIMO DÍA EXTERNA", "OPORTUNIDAD 0 EXTERNA", "ABRE CONTADO", "ÚLTIMO DÍA CONTADO", "QUÉ HACER", "ASEGURADORA",
