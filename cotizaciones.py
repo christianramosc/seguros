@@ -4,7 +4,9 @@ Cotizaciones de póliza externa (Multicotizador de Istra) para comparar contra l
 
 El archivo es un Excel con una hoja «Comparativo» (o «Cotizaciones» dentro de Polizas_extraidas.xlsx): fila de
 encabezados con CLIENTE y SERIE, una columna por aseguradora terminada en «(VC)» (valor comercial) y, si hay,
-en «(VF)» (valor factura), más NOTAS. La más barata se calcula aquí, no se toma de las fórmulas del archivo.
+en «(VF)» (valor factura), más NOTAS. La más barata se calcula aquí, no se toma de las fórmulas del archivo, y
+no cuenta las primas fuera de rango (menos del 60 % o más del doble de la mediana del cliente); en el PDF salen
+como «omitida».
 
   leer(xlsx_bytes)            → DataFrame por SERIE con precios, la más barata y notas (o None)
   agregar(base, cot)          → base + EXTERNA MÁS BARATA, ASEGURADORA EXTERNA, AHORRO EXTERNA, …
@@ -12,10 +14,12 @@ en «(VF)» (valor factura), más NOTAS. La más barata se calcula aquí, no se 
 """
 import io
 import re
+import statistics
 
 import pandas as pd
 
 HOJA = "Cotizaciones"
+MIN_RELATIVO, MAX_RELATIVO = 0.6, 2.0     # rango aceptado respecto a la mediana de las primas del cliente
 HOJAS_FUENTE = ("Comparativo", HOJA)
 # Aseguradoras que se muestran en el PDF; las tarifas ABA (Chubb) se juntan en una sola (la más barata).
 GRUPOS = {"Quálitas": "QUÁLITAS", "ABA": "ABA/CHUBB", "AXA": "AXA", "GNP": "GNP", "HDI": "HDI", "Zurich": "ZURICH"}
@@ -33,6 +37,20 @@ def _num(v):
         return f if f == f and f > 0 else None
     except (TypeError, ValueError):
         return None
+
+
+def fuera_de_rango(v, mediana):
+    """Prima que no se toma en cuenta: menos del 60 % o más del doble de la mediana del cliente (casi siempre HDI:
+    puede ser un error del cotizador o una tarifa con otras coberturas)."""
+    return bool(mediana) and (v < MIN_RELATIVO * mediana or v > MAX_RELATIVO * mediana)
+
+
+def _limpiar_nota(nota):
+    """Quita de la nota los avisos de precios raros (ahora se omiten y se anotan aparte)."""
+    if nota in ("nan", "None"):
+        return ""
+    partes = [p.strip() for p in nota.split(";")]
+    return "; ".join(p for p in partes if p and not re.match(r"(Muy barata|Precio fuera de rango|Omitida)", p))
 
 
 def _grupo(col):
@@ -65,20 +83,36 @@ def leer(xlsx_bytes):
     vf = [c for c in df.columns if c.endswith("(VF)") and not c.startswith("MÁS BARATA")]
     out = []
     for _, r in df.iterrows():
-        precios = {}
-        for c in vc:                                        # por aseguradora, la tarifa más barata
-            v = _num(r[c])
+        todos = [(c, _num(r[c])) for c in vc]
+        # la mediana se toma con todas las primas, también las que ya vienen como «omitida ($…)»
+        validos = [v for _, v in todos if v] + [
+            _num(re.sub(r"[^\d.]", "", str(r[c]))) for c in vc if str(r[c]).strip().lower().startswith("omitida")]
+        validos = [v for v in validos if v]
+        med = statistics.median(validos) if validos else 0
+        precios, omitidas = {}, {}
+        for c, v in todos:                                  # por aseguradora, la tarifa más barata
             g = _grupo(c)
-            if v and (g not in precios or v < precios[g]):
+            texto = str(r[c]).strip().lower()
+            if texto.startswith("omitida"):                 # ya viene omitida en el Excel: «omitida ($5,833)»
+                omitidas.setdefault(g, _num(re.sub(r"[^\d.]", "", texto)))
+                continue
+            if not v:
+                continue
+            if fuera_de_rango(v, med):                      # posible error del cotizador u otra cobertura
+                omitidas.setdefault(g, v)
+                continue
+            if g not in precios or v < precios[g]:
                 precios[g] = v
-        en_vf = [v for v in (_num(r[c]) for c in vf) if v]
+        omitidas = {g: v for g, v in omitidas.items() if g not in precios}
+        en_vf = [v for v in (_num(r[c]) for c in vf) if v and not fuera_de_rango(v, med)]
         vf_min = min(en_vf) if en_vf else None
         mejor = min(precios, key=precios.get) if precios else ""
-        nota = str(r.get("NOTAS") or "").strip()
-        out.append({"SERIE": str(r["SERIE"]).strip(), "PRECIOS": precios,
+        nota = _limpiar_nota(str(r.get("NOTAS") or "").strip())
+        if omitidas:
+            nota = "; ".join(x for x in [nota, "Omitida por precio fuera de rango: " + ", ".join(omitidas)] if x)
+        out.append({"SERIE": str(r["SERIE"]).strip(), "PRECIOS": precios, "OMITIDAS": omitidas,
                     "EXTERNA MÁS BARATA": precios.get(mejor), "ASEGURADORA EXTERNA": mejor,
-                    "EXTERNA VF MÁS BARATA": vf_min, "NOTA COTIZACIÓN": "" if nota in ("nan", "None") else nota,
-                    "FECHA COTIZACIÓN": fecha})
+                    "EXTERNA VF MÁS BARATA": vf_min, "NOTA COTIZACIÓN": nota, "FECHA COTIZACIÓN": fecha})
     return pd.DataFrame(out).drop_duplicates("SERIE").set_index("SERIE") if out else None
 
 
@@ -86,13 +120,14 @@ def agregar(base, cot):
     """Columnas de la cotización en la base (por SERIE). AHORRO = prima anual actual − la externa más barata."""
     b = base.copy()
     if cot is None or cot.empty:
-        for c in COLS + ["PRECIOS EXTERNA"]:
+        for c in COLS + ["PRECIOS EXTERNA", "OMITIDAS EXTERNA"]:
             b[c] = None
         return b
     for c in COLS:
         if c in cot.columns:
             b[c] = b["SERIE"].map(cot[c])
     b["PRECIOS EXTERNA"] = b["SERIE"].map(cot["PRECIOS"])
+    b["OMITIDAS EXTERNA"] = b["SERIE"].map(cot["OMITIDAS"]) if "OMITIDAS" in cot.columns else None
     b["AHORRO EXTERNA"] = [round(a - e, 2) if a == a and a and e == e and e else None
                            for a, e in zip(b["PRIMA ANUAL ACTUAL"], b["EXTERNA MÁS BARATA"])]
     return b

@@ -131,7 +131,7 @@ def leer_contacto(excel_bytes):
             df = cotizaciones.agregar(df, cot)
     keep = ["CLIENTE", "TELÉFONO", "NOTA TELÉFONO", "CORREO", "ASEGURADORA", "PÓLIZA ACTUAL", "PRIMA ANUAL ACTUAL", "VEHÍCULO",
             "SERIE", "MOTOR", "RFC", "FOLIO CRÉDITO", "MUNICIPIO", "DIRECCIÓN", "CP", "PRIMERA OPORTUNIDAD",
-            "FIN DEL CRÉDITO"] + COLS_SEG + cotizaciones.COLS + ["PRECIOS EXTERNA"]
+            "FIN DEL CRÉDITO"] + COLS_SEG + cotizaciones.COLS + ["PRECIOS EXTERNA", "OMITIDAS EXTERNA"]
     return df[[c for c in keep if c in df.columns]].reset_index(drop=True)
 
 
@@ -482,11 +482,6 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
         if a is not None:
             linea.append(f'<font color="{VERDE}" size="7">Ahorra ${a:,.0f}</font>' if a > 0 else
                          f'<font color="{TINTA_2}" size="7">Su póliza es ${-a:,.0f} más barata</font>')
-        revisar = txt(r.get("NOTA COTIZACIÓN")).split("revisa coberturas:")[-1] \
-            if "revisa coberturas:" in txt(r.get("NOTA COTIZACIÓN")) else ""
-        cia = txt(r.get("ASEGURADORA EXTERNA")).split("/")[0]
-        if cia and any(x.strip().upper().startswith(cia) for x in revisar.split(";")[0].split(",")):
-            linea.append(f'<font color="{NARANJA}" size="6.5">Revisa coberturas</font>')
         return "<br/>".join(linea)
 
     def compuesta(c, r):
@@ -547,7 +542,6 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
     def comparativa(df):
         """Sección: póliza actual contra las cotizaciones de póliza externa, del mayor ahorro al menor."""
         from reportlab.platypus import PageBreak
-        import statistics
         d = df[df["EXTERNA MÁS BARATA"].map(lambda v: bool(num(v)))].copy()
         d["_a"] = d["AHORRO EXTERNA"].map(lambda v: num(v) if num(v) is not None else -1e9)
         d = d.sort_values("_a", ascending=False)
@@ -570,16 +564,17 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
         gris = f'<font color="{TINTA_2}" size="7">'
         for i, (_, r) in enumerate(d.iterrows(), start=1):
             precios = r.get("PRECIOS EXTERNA") if isinstance(r.get("PRECIOS EXTERNA"), dict) else {}
-            med = statistics.median(precios.values()) if precios else 0
             actual, a = num(r.get("PRIMA ANUAL ACTUAL")), num(r.get("AHORRO EXTERNA"))
             fila = [Paragraph(f"<b>{_e(txt(r.get('CLIENTE')))}</b>" + (f"<br/>{gris}{_e(telefono(r.get('TELÉFONO')))}</font>"
                                                                         if telefono(r.get("TELÉFONO")) else ""), st["celda"]),
                     Paragraph((f"${actual:,.0f}" if actual else "—") + f"<br/>{gris}{_e(txt(r.get('ASEGURADORA')))}</font>",
                               st["celda"])]
+            omitidas = r.get("OMITIDAS EXTERNA") if isinstance(r.get("OMITIDAS EXTERNA"), dict) else {}
             for j, g in enumerate(grupos, start=2):
                 v = precios.get(g)
-                if v and med and v > 2 * med:
-                    fila.append(Paragraph(f'<font color="{NARANJA}">${v:,.0f}</font>', st["celda"]))
+                if not v and omitidas.get(g):           # prima fuera de rango: no cuenta para la más barata
+                    fila.append(Paragraph(f'<font color="{TINTA_3}" size="6.5"><strike>${omitidas[g]:,.0f}</strike>'
+                                          f'<br/>omitida</font>', st["celda"]))
                 else:
                     fila.append(P(f"${v:,.0f}" if v else "—"))
                 if g == r.get("ASEGURADORA EXTERNA"):
@@ -596,8 +591,9 @@ def pdf(df_hoy, df_periodo, titulo_periodo, hoy=None):
         t = Table(filas, colWidths=[util * x for x in anchos], repeatRows=1)
         t.setStyle(TableStyle(estilos))
         out += [t, Spacer(1, 6),
-                P("En verde, la aseguradora más barata de cada cliente. En naranja, precios fuera de rango o notas que "
-                  "revisar. ABA/CHUBB es la más barata de sus tarifas. Valor factura solo cambia el precio en autos "
+                P("En verde, la aseguradora más barata de cada cliente. Tachadas, las primas omitidas por estar fuera "
+                  "de rango (menos del 60 % o más del doble de la mediana del cliente; casi todas de HDI): pueden ser un "
+                  "error del cotizador y no cuentan para la más barata. En naranja, notas que revisar. ABA/CHUBB es la más barata de sus tarifas. Valor factura solo cambia el precio en autos "
                   "2025-2026. Antes de ofrecer una póliza, confirma coberturas y deducibles en el cotizador.", "sub")]
         return out
 

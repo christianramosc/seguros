@@ -84,6 +84,8 @@ SERIE y una columna por aseguradora terminada en *(VC)* / *(VF)*). La app lo gua
 (hoja *Cotizaciones*, se conserva aunque vuelvas a subir PDFs), muestra la externa más barata y el ahorro contra la
 prima anual actual, y el **PDF para contactar** agrega la columna *Póliza externa* y una sección *Comparativa con
 pólizas externas* ordenada del mayor ahorro al menor. Puedes subirlo solo, sobre el Excel que ya está abierto.
+Las primas fuera de rango (menos del 60 % o más del doble de la mediana del cliente, casi siempre HDI) no cuentan
+para la más barata: en el PDF salen tachadas como *omitida*.
 
 ## Copia en Google Sheets (para consultar y usar en otras apps)
 
