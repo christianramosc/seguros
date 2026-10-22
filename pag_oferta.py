@@ -6,6 +6,8 @@ boletín de MG Financial Services con el método del cotizador de Autoexpress (c
 El enganche se ajusta solo: pago inicial − seguro del primer año − comisión por apertura (+ bono si va al enganche).
 Arriba queda lo que paga el cliente con la mejor opción: pago inicial, tasa, mensualidad y plazo.
 """
+import importlib
+import os
 import re
 
 import altair as alt
@@ -14,6 +16,13 @@ import streamlit as st
 
 import oferta_mg as om
 from ui import hero, tarjeta
+
+# Streamlit Cloud conserva los módulos importados entre despliegues: si oferta_mg.py cambió (boletín nuevo, ajustes),
+# se recarga para no usar la versión anterior.
+_mtime = os.path.getmtime(om.__file__)
+if getattr(om, "_mtime", None) != _mtime:
+    om = importlib.reload(om)
+    om._mtime = _mtime
 
 VERDE = "background-color: #E6F4EA; font-weight: 600"
 PALETA = ["#C8102E", "#1F4E79", "#2E8B57", "#E07B00", "#6A3D9A", "#00838F", "#8D6E63"]
