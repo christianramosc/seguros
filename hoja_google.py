@@ -42,6 +42,33 @@ def configurado():
     return bool(url() and _secret("gcp_service_account"))
 
 
+@st.cache_resource(show_spinner=False)
+def _cliente():
+    import gspread
+    from gspread.http_client import BackOffHTTPClient
+    return gspread.service_account_from_dict(dict(_secret("gcp_service_account")), http_client=BackOffHTTPClient)
+
+
+@st.cache_data(ttl=600, show_spinner="Conectando con el Google Sheet…")
+def _titulo(u):
+    return _cliente().open_by_url(u).title
+
+
+def panel(donde=st):
+    """Como en reportessaleu: a qué Google Sheet se copian las pólizas (o por qué no se copian)."""
+    if not configurado():
+        donde.info("Sin Google Sheet: agrega SEGUIMIENTO_SHEET_URL (o POLIZAS_SHEET_URL) y [gcp_service_account] en "
+                   "Settings → Secrets para copiar las pólizas a la pestaña Polizas.", icon=":material/cloud_off:")
+        return
+    try:
+        titulo = _titulo(url())
+    except Exception as e:
+        donde.error(f"No se pudo abrir el Google Sheet: {e}. Compártelo como Editor con la cuenta de servicio.",
+                    icon=":material/error:")
+        return
+    donde.success(f"Conectado a **{titulo}** · [abrir]({url()}) · pestaña {PESTANA}", icon=":material/cloud_done:")
+
+
 def _celda(col, v):
     if v is None or (not isinstance(v, str) and pd.isna(v)):
         return ""
@@ -63,11 +90,8 @@ def publicar(df):
         return False, "Google Sheet sin configurar"
     try:
         import gspread
-        from gspread.http_client import BackOffHTTPClient
         from gspread.utils import ValueInputOption
-        cliente = gspread.service_account_from_dict(dict(_secret("gcp_service_account")),
-                                                    http_client=BackOffHTTPClient)
-        libro = cliente.open_by_url(url())
+        libro = _cliente().open_by_url(url())
         cols = [c for c in COLUMNAS if c in df.columns]
         ahora = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
         tabla = [cols + ["ACTUALIZADO"]] + [[_celda(c, r[c]) for c in cols] + [ahora]
