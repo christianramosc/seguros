@@ -17,8 +17,10 @@ Reglas (boletín BMGFS-16-10-2026, vigente del 09-oct al 02-nov-2026):
   · No incluye Anualidades, University ni Seminuevos.
 
 Cálculo igual al cotizador de Autoexpress (validado contra cotizaciones reales, oct-2026):
-  · Pago inicial = enganche del cliente + seguro del primer año (contado) + comisión por apertura.
-    Con lo que trae el cliente se despeja el enganche: enganche = pago − seguro − comisión (+ bono si va al enganche).
+  · Pago inicial (como en la cotización) = enganche + comisión por apertura + seguro contado año 1 + GAP contado.
+    El enganche incluye el bono cuando va al enganche.
+  · Desembolso del cliente = lo que pone de su bolsa = pago inicial − bono al enganche. Es el dato que se captura:
+    enganche = desembolso − seguro − GAP contado − comisión (+ bono si va al enganche).
   · Enganche % sobre precio + GAP (si se incluye). Capital = precio + GAP − enganche total.
   · Comisión por apertura = CXA% + IVA sobre el monto total a financiar (capital + seguro anual × años 2 en adelante).
   · Tasa con IVA = tasa × 1.16 redondeada a 2 decimales; pagos fijos mensuales.
@@ -214,8 +216,9 @@ def mensualidad(monto, tasa_anual_pct, n, iva=True):
 
 
 def evaluar(op, n, d):
-    """Cotiza la oferta `op` a `n` meses con los datos `d` (precio, gap, bono, pago, seguro1, seguro_anual, iva).
-    El enganche se despeja del pago inicial del cliente. None si la oferta no maneja ese plazo."""
+    """Cotiza la oferta `op` a `n` meses con los datos `d` (precio, gap financiado, gap_contado, bono, pago =
+    desembolso del cliente, seguro1, seguro_anual, iva). El enganche se despeja del desembolso del cliente.
+    None si la oferta no maneja ese plazo."""
     if n not in op["tasas"]:
         return None
     anios = n // 12 - 1                       # años de seguro que se financian
@@ -227,14 +230,14 @@ def evaluar(op, n, d):
         candidatos = [("al enganche", precio + gap, bono), ("al precio", precio - bono + gap, 0.0)]
     primero = None
     for forma, base, bono_eng in candidatos:
-        eng_cli = (d["pago"] - d["seguro1"] - c * (base - bono_eng + sa * anios)) / (1 - c)
+        eng_cli = (d["pago"] - d["seguro1"] - d["gap_contado"] - c * (base - bono_eng + sa * anios)) / (1 - c)
         eng_tot = eng_cli + bono_eng
         cap = base - eng_tot
         pct = eng_tot / base
         pct_cli = eng_cli / base
         motivo = ""
         if eng_cli < 0:
-            motivo = "El pago inicial no alcanza para seguro y comisión"
+            motivo = "El desembolso no alcanza para seguro y comisión"
         elif pct < op["min"] - 1e-9:
             motivo = f"Enganche {pct:.2%} menor al mínimo {op['min']:.0%}"
         elif pct_cli < ENGANCHE_MIN_CLIENTE - 1e-9:
@@ -257,7 +260,8 @@ def evaluar(op, n, d):
                  pct_cliente=pct_cli,
                  bono_eng=bono_eng, eng_total=eng_tot, financiado=cap, monto_total=cap + sa * anios,
                  cxa=c * (cap + sa * anios), tasa=op["tasas"][n], tasa_iva=ti, pago_capital=pm, vida=vida1,
-                 mens=m1, mens2=m2, total=total, plazo=n, seguro1=d["seguro1"], pago=d["pago"])
+                 mens=m1, mens2=m2, total=total, plazo=n, seguro1=d["seguro1"], gap_contado=d["gap_contado"],
+                 desembolso=d["pago"], pago_inicial=eng_tot + c * (cap + sa * anios) + d["seguro1"] + d["gap_contado"])
         if r["valida"]:
             return r
         primero = primero or r
@@ -327,8 +331,8 @@ def texto_tasas(op):
 
 
 def requisito(op, d, n=None):
-    """Enganche mínimo de la oferta: del sistema (incluye el bono si va al enganche) y real del cliente, y el pago
-    inicial mínimo (enganche + seguro + comisión) a `n` meses con el seguro capturado."""
+    """Enganche mínimo de la oferta: del sistema (incluye el bono si va al enganche) y real del cliente; y el
+    desembolso y el pago inicial mínimos (con seguro, GAP contado y comisión) a `n` meses."""
     precio, gap, bono = d["precio"], d["gap"], d["bono"]
     base = precio + gap
     if op["modo"] == "flexible":
@@ -344,10 +348,11 @@ def requisito(op, d, n=None):
     anios = n // 12 - 1
     c = op["cxa"] * (1 + IVA)
     cap = base - cli_monto - bono_eng
-    pago_min = cli_monto + d["seguro1"] + c * (cap + d["seguro_anual"] * anios)
+    desembolso_min = cli_monto + d["seguro1"] + d["gap_contado"] + c * (cap + d["seguro_anual"] * anios)
     return dict(oferta=op["nombre"], baremo=op["baremo"], cxa=op["cxa"], tasas=texto_tasas(op),
                 min_sistema=op["min"], min_max=op["max"], min_cliente=cli_pct, min_cliente_monto=cli_monto,
-                bono=forma, pago_min=math.ceil(round(pago_min, 2)), plazo_pago_min=n)
+                bono=forma, desembolso_min=math.ceil(round(desembolso_min, 2)),
+                pago_inicial_min=math.ceil(round(desembolso_min + bono_eng, 2)), plazo_pago_min=n)
 
 
 def describir(vehiculo, precio, bono):
@@ -373,16 +378,21 @@ def describir(vehiculo, precio, bono):
                   f"Oferta vigente {VIGENCIA}.")
 
 
-def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_manual=0.0, incluir_gap=False,
+GAP_MODOS = ("No", "Contado", "Financiado")
+
+
+def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_manual=0.0, gap_modo="No",
              iva=True):
-    """pago = todo lo que trae el cliente (enganche + seguro del primer año + comisión por apertura).
-    incluir_gap: suma el GAP del rango de precio (solo si TABLA_GAP ya tiene montos)."""
+    """pago = desembolso del cliente: lo que pone de su bolsa (pago inicial − bono al enganche).
+    gap_modo: «No», «Contado» (va en el pago inicial) o «Financiado» (se suma al precio); el monto sale de TABLA_GAP
+    y solo aplica si ya tiene montos."""
     v = CATALOGO[vehiculo]
     precio = precio_manual if precio_manual and precio_manual > 0 else v["msrp"]
     if not precio:
         raise ValueError(f"«{vehiculo}» no tiene precio en el boletín: captura el precio.")
-    gap = (monto_gap(precio) or 0.0) if incluir_gap and gap_disponible() else 0.0
-    d = dict(precio=precio, gap=gap, bono=v["bono"], pago=pago, seguro1=seguro1 or 0.0,
+    gap = (monto_gap(precio) or 0.0) if gap_modo != "No" and gap_disponible() else 0.0
+    d = dict(precio=precio, gap=gap if gap_modo == "Financiado" else 0.0,
+             gap_contado=gap if gap_modo == "Contado" else 0.0, bono=v["bono"], pago=pago, seguro1=seguro1 or 0.0,
              seguro_anual_capturado=seguro_anual or 0.0, seguro_anual=(seguro_anual or seguro1 or 0.0), iva=iva)
     ops = ofertas_para(v)
     evals = {o["nombre"]: evaluar(o, plazo, d) for o in ops}
@@ -391,7 +401,8 @@ def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_man
     matriz = {o["nombre"]: {n: evaluar(o, n, d) for n in PLAZOS} for o in ops}
     mejores = {n: mejor_en(ops, n, d) for n in PLAZOS}
     rangos = {o["nombre"]: (rango_seguro(o, plazo, d) if plazo in o["tasas"] else None) for o in ops}
-    return dict(vehiculo=vehiculo, precio=precio, bono=v["bono"], gap=d["gap"], pago=pago, seguro=d["seguro1"],
+    return dict(vehiculo=vehiculo, precio=precio, bono=v["bono"], gap=gap, gap_modo=gap_modo if gap else "No",
+                pago=pago, seguro=d["seguro1"],
                 seguro_anual=d["seguro_anual"], seguro_anual_estimado=not seguro_anual and bool(seguro1),
                 plazo=plazo, iva=iva, ops=ops, evals=evals, ranking=ranking, matriz=matriz, mejores=mejores,
                 rangos=rangos, tramos=tramos_seguro(ops, plazo, d),
@@ -418,10 +429,24 @@ def texto_mens(t):
 
 
 def desglose(ev):
-    """Texto del pago inicial: enganche + seguro + comisión."""
-    partes = [f"eng. {money0(ev['eng_cliente'])}", f"seguro {money0(ev['seguro1'])}"]
+    """Texto del pago inicial: enganche + comisión + seguro año 1 + GAP contado."""
+    partes = [f"eng. {money0(ev['eng_total'])}"]
     if ev["cxa"]:
         partes.append(f"com. {money0(ev['cxa'])}")
+    partes.append(f"seguro {money0(ev['seguro1'])}")
+    if ev["gap_contado"]:
+        partes.append(f"GAP {money0(ev['gap_contado'])}")
+    return " + ".join(partes)
+
+
+def desglose_desembolso(ev):
+    """Texto del desembolso del cliente: enganche propio + comisión + seguro año 1 + GAP contado."""
+    partes = [f"eng. propio {money0(ev['eng_cliente'])} ({ev['pct_cliente']:.1%})"]
+    if ev["cxa"]:
+        partes.append(f"com. {money0(ev['cxa'])}")
+    partes.append(f"seguro {money0(ev['seguro1'])}")
+    if ev["gap_contado"]:
+        partes.append(f"GAP {money0(ev['gap_contado'])}")
     return " + ".join(partes)
 
 
@@ -446,7 +471,7 @@ def pdf_bytes(res, cliente=""):
     W, H = landscape(letter)
     M = 36
     ancho = W - 2 * M
-    plazo, pago, seguro = res["plazo"], res["pago"], res["seguro"]
+    plazo, pago, seguro = res["plazo"], res["pago"], res["seguro"]   # pago = desembolso del cliente
 
     def st(name, size=9, color=NEGRO, bold=False, align=0, leading=None):
         return ParagraphStyle(name, fontName="Helvetica-Bold" if bold else "Helvetica", fontSize=size,
@@ -480,7 +505,7 @@ def pdf_bytes(res, cliente=""):
     doc.addPageTemplates([PageTemplate(id="p", onPage=encabezado, frames=[Frame(M, 36, ancho, H - 88, id="f")])])
     story = [P(res["vehiculo"], s_h1)]
     sub = (f"Precio {money0(res['precio'])} · bono MG {money0(res['bono'])}"
-           + (f" · GAP {money0(res['gap'])}" if res["gap"] else "")
+           + (f" · GAP {res['gap_modo'].lower()} {money0(res['gap'])}" if res["gap"] else "")
            + f" · seguro 1er año {money(seguro) if seguro else 'por definir'}"
            + (f" · seguro anual resto del plazo {money(res['seguro_anual'])}"
               + (" (estimado)" if res["seguro_anual_estimado"] else "") if res["seguro_anual"] else "")
@@ -494,11 +519,8 @@ def pdf_bytes(res, cliente=""):
         _, op, ev = ranking[0]
         story.append(P(f"LO QUE PAGA EL CLIENTE · MEJOR OPCIÓN: {op['nombre'].upper()}", st("r0", 9, ROJO, True)))
         story.append(Spacer(1, 4))
-        eng_det = (f"{ev['pct_cliente']:.1%} del precio" + (" + GAP" if res["gap"] else "")
-                   + (f" · + bono {money0(ev['bono_eng'])} = {money0(ev['eng_total'])} ({ev['pct']:.1%})"
-                      if ev["bono_eng"] else ""))
-        datos = [("PAGO INICIAL", money(pago), desglose(ev)),
-                 ("ENGANCHE DEL CLIENTE", money(ev["eng_cliente"]), eng_det),
+        datos = [("PAGO INICIAL", money(ev["pago_inicial"]), desglose(ev)),
+                 ("DESEMBOLSO DEL CLIENTE", money(pago), desglose_desembolso(ev)),
                  ("TASA", f"{ev['tasa']:.2f}%", f"{ev['tasa_iva']:.2f}% con IVA · comisión {op['cxa']:.0%}"),
                  ("MENSUALIDAD", money(ev["mens"]),
                   "meses 1-12" + (f" · meses 13+: {money(ev['mens2'])}" if ev["mens2"] else "")),
@@ -516,17 +538,18 @@ def pdf_bytes(res, cliente=""):
             notas.append(f"Menor mensualidad: {menor[1]['nombre']} con {money(menor[2]['mens'])}, pero cuesta "
                          f"{money(menor[0] - ranking[0][0])} más en total.")
         if not seguro:
-            notas.append("Seguro en $0: supone que todo el pago inicial es enganche. Revisa la sección del seguro.")
+            notas.append("Seguro en $0: supone que todo el desembolso es enganche. Revisa la sección del seguro.")
         story += [P(" ".join(notas), s_small), Spacer(1, 12)]
     else:
-        story += [P(f"Ninguna oferta es válida a {plazo} meses con este pago inicial.", s_h2), Spacer(1, 10)]
+        story += [P(f"Ninguna oferta es válida a {plazo} meses con este desembolso.", s_h2), Spacer(1, 10)]
 
     story.append(P(f"Comparativo de ofertas a {plazo} meses", s_h2))
-    story.append(P("Con el mismo pago inicial en todas: el enganche se ajusta a lo que queda después del seguro y la "
-                   "comisión (más el bono si va al enganche). Ordenadas por el total de mensualidades.", s_small))
+    story.append(P("Con el mismo desembolso del cliente en todas: el enganche se ajusta a lo que queda después del "
+                   "seguro y la comisión (más el bono si va al enganche). Pago inicial = enganche + comisión + seguro "
+                   "año 1 + GAP contado. Ordenadas por el total de mensualidades.", s_small))
     story.append(Spacer(1, 5))
-    cab = ["#", "Oferta", "Bono", "Eng. cliente", "Eng. total", "Comisión", "Tasa / c IVA", "Financ.",
-           "Mens. 1-12", "Mens. 13+", "Total mens.", "Seguro permitido"]
+    cab = ["#", "Oferta", "Bono", "Eng. cliente", "Eng. total", "Com.", "Pago inicial", "Tasa / c IVA",
+           "Financ.", "Mens. 1-12", "Mens. 13+", "Total mens.", "Seguro permitido"]
     nom = lambda o, est: P(f"{o['nombre']}<br/><font size=6.5 color='#5A5A5A'>Baremo {o['baremo']}</font>", est)
     filas = [[P(h, s_head) for h in cab]]
     for i, (tot, o, e) in enumerate(ranking, 1):
@@ -534,7 +557,8 @@ def pdf_bytes(res, cliente=""):
         filas.append([P(i, s_cell_c), nom(o, s_cell_b if i == 1 else s_cell), P(e["forma"], s_cell_c),
                       P(f"{money0(e['eng_cliente'])}<br/>{e['pct_cliente']:.1%}", b),
                       P(f"{money0(e['eng_total'])}<br/>{e['pct']:.1%}", s_cell_c),
-                      P(money(e["cxa"]), s_cell_c), P(f"{e['tasa']:.2f}% / {e['tasa_iva']:.2f}%", s_cell_c),
+                      P(money(e["cxa"]), s_cell_c), P(money0(e["pago_inicial"]), s_cell_c),
+                      P(f"{e['tasa']:.2f}% / {e['tasa_iva']:.2f}%", s_cell_c),
                       P(money0(e["financiado"]), s_cell_c), P(money(e["mens"]), b), P(money(e["mens2"]), s_cell_c),
                       P(money(tot), s_cell_c), P(texto_rango(res["rangos"][o["nombre"]]), s_cell_c)])
     malas = [o for o in res["ops"] if not (res["evals"][o["nombre"]] and res["evals"][o["nombre"]]["valida"])]
@@ -542,8 +566,8 @@ def pdf_bytes(res, cliente=""):
         e = res["evals"][o["nombre"]]
         filas.append([P("—", s_cell_c), nom(o, s_gris), P("", s_cell),
                       P(e["motivo"] if e else "No maneja este plazo", st("m", 7.5, TXT2, align=TA_CENTER))]
-                     + [P("")] * 7 + [P(texto_rango(res["rangos"][o["nombre"]]), s_cell_c)])
-    cw = [0.025, 0.19, 0.07, 0.075, 0.075, 0.07, 0.085, 0.07, 0.07, 0.07, 0.09, 0.11]
+                     + [P("")] * 8 + [P(texto_rango(res["rangos"][o["nombre"]]), s_cell_c)])
+    cw = [0.025, 0.16, 0.075, 0.07, 0.07, 0.06, 0.075, 0.08, 0.065, 0.07, 0.07, 0.085, 0.095]
     tr = Table(filas, colWidths=[ancho * x for x in cw], repeatRows=1)
     est = [("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
            ("LINEBELOW", (0, 1), (-1, -1), 0.4, GRIS2), ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -552,7 +576,7 @@ def pdf_bytes(res, cliente=""):
         est.append(("BACKGROUND", (0, 1), (-1, 1), VERDE))
     for k in range(len(malas)):
         r = len(ranking) + 1 + k
-        est += [("BACKGROUND", (0, r), (-1, r), GRIS), ("SPAN", (3, r), (10, r))]
+        est += [("BACKGROUND", (0, r), (-1, r), GRIS), ("SPAN", (3, r), (11, r))]
     tr.setStyle(TableStyle(est))
     story += [tr, Spacer(1, 8),
               P("Mensualidad = pago fijo del capital + seguro de vida (0.82% anual sobre el capital). Desde el mes 13 "
@@ -565,31 +589,34 @@ def pdf_bytes(res, cliente=""):
     story.append(P("Oferta del boletín para este auto", s_h2))
     story.append(P(res["descripcion"], s_p))
     story.append(Spacer(1, 6))
-    cab_o = ["Oferta", "Tasas por plazo", "Comisión", "Bono", "Eng. mínimo sistema",
-             "Eng. mínimo real del cliente", f"Pago inicial mínimo ({plazo} m, con seguro y comisión)"]
+    cab_o = ["Oferta", "Tasas por plazo", "Com.", "Bono", "Eng. mínimo sistema",
+             "Eng. mínimo real del cliente", f"Desembolso mínimo ({plazo} m)", f"Pago inicial mínimo ({plazo} m)"]
     filas_o = [[P(h, s_head) for h in cab_o]]
     for q in res["requisitos"]:
         sis = f"{q['min_sistema']:.0%}" + (f" a &lt;{q['min_max']:.0%}" if q["min_max"] else "")
+        otro = "" if q["plazo_pago_min"] == plazo else f" ({q['plazo_pago_min']} m)"
         filas_o.append([P(f"{q['oferta']}<br/><font size=6.5 color='#5A5A5A'>Baremo {q['baremo']}</font>"),
                         P(q["tasas"], st("tz", 7.5, NEGRO, leading=9.5)), P(f"{q['cxa']:.0%}", s_cell_c),
                         P(q["bono"], s_cell_c), P(sis, s_cell_c),
                         P(f"<b>{q['min_cliente']:.1%}</b><br/>{money0(q['min_cliente_monto'])}", s_cell_c),
-                        P(money0(q["pago_min"]) + ("" if q["plazo_pago_min"] == plazo else
-                                                   f" ({q['plazo_pago_min']} m)"), s_cell_c)])
-    to = Table(filas_o, colWidths=[ancho * x for x in (0.21, 0.25, 0.07, 0.1, 0.09, 0.12, 0.16)], repeatRows=1)
+                        P(money0(q["desembolso_min"]) + otro, s_cell_c),
+                        P(money0(q["pago_inicial_min"]) + otro, s_cell_c)])
+    to = Table(filas_o, colWidths=[ancho * x for x in (0.2, 0.22, 0.06, 0.1, 0.08, 0.11, 0.115, 0.115)],
+               repeatRows=1)
     to.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                             ("LINEBELOW", (0, 1), (-1, -1), 0.4, GRIS2), ("TOPPADDING", (0, 0), (-1, -1), 4),
                             ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
     story += [to, Spacer(1, 4),
               P("Eng. mínimo real del cliente: lo que el cliente pone de su bolsa. Con bono al enganche = enganche "
                 "sistema − % del bono (mínimo 10%); en Tasa Baja el bono va a la tasa y el cliente pone todo el "
-                "enganche. El pago inicial mínimo suma el seguro del primer año y la comisión por apertura.", s_small),
+                "enganche. Desembolso mínimo = enganche propio + seguro año 1 + GAP contado + comisión; pago inicial "
+                "mínimo = desembolso + bono al enganche (como lo muestra la cotización).", s_small),
               Spacer(1, 14)]
 
     # --- Seguro
     tramos = res["tramos"]
     story.append(P("¿Cuánto puede valer el seguro del primer año?", s_h2))
-    story.append(P(f"El seguro se paga de contado con el pago inicial ({money0(pago)}): entre más cuesta, menos "
+    story.append(P(f"El seguro se paga de contado con el desembolso del cliente ({money0(pago)}): entre más cuesta, menos "
                    f"enganche queda. Mejor oferta a {plazo} meses según el costo del seguro"
                    + ("" if res["seguro_anual_estimado"] is False and res["seguro_anual"] else
                       " (el seguro anual del resto del plazo se toma igual al del primer año)") + ".", s_p))
@@ -637,7 +664,7 @@ def pdf_bytes(res, cliente=""):
 
     # --- Matriz por plazo
     bloque = [P("Mensualidad (meses 1-12) por oferta y plazo", s_h2),
-              P("Con el enganche que resulta del pago inicial en cada plazo. En verde, la mejor de cada plazo.",
+              P("Con el enganche que resulta del desembolso del cliente en cada plazo. En verde, la mejor de cada plazo.",
                 s_small), Spacer(1, 5)]
     filas_x = [[P(h, s_head) for h in ["Oferta", "Eng. mín"] + [f"{n} m" for n in PLAZOS]]]
     est_x = [("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
