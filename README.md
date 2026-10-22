@@ -48,18 +48,26 @@ Aseguradoras reconocidas: GNP, Quálitas, Chubb, HDI y Seguros Inbursa.
 
 ## Mejor oferta MG (pestaña de arriba)
 
-Eliges el auto del boletín de MG Financial Services, el pago inicial del cliente, el seguro de contado (opcional) y
-el plazo. Compara todas las ofertas (Tasa Baja 0% CXA, Tasa Baja 2% CXA, Lanzamiento 8.99%, Estándar 13.74%,
-Estándar 17.74% y Especial 12.09%), aplica el bono a tasa, al enganche o al precio, y muestra:
+Eliges el auto del boletín de MG Financial Services y capturas **lo que trae el cliente** (pago inicial), el seguro
+del primer año, el seguro anual del resto del plazo, el plazo y, si aplica, precio y GAP. Arriba queda **lo que paga el
+cliente** con la mejor opción: pago inicial, tasa, mensualidad y plazo.
 
-- **Ranking** por lo que paga el cliente después del pago inicial (CXA + mensualidades) y el seguro máximo que
-  permite cada oferta.
-- **Seguro**: qué oferta es la ideal según lo que cueste el seguro de contado.
-- **Por plazo**: mensualidades de todas las ofertas en 12 a 72 meses y la mejor de cada plazo.
-- **PDF del análisis** para descargar.
+El enganche se ajusta solo: **pago inicial − seguro del primer año − comisión por apertura (+ bono si va al
+enganche)**. Las mensualidades usan el mismo método del cotizador de Autoexpress (validado contra cotizaciones reales):
 
-Mensualidades sin seguro, con IVA sobre intereses y pagos fijos. **Cada mes** actualiza en `oferta_mg.py`:
-`BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche sistema y tasas bajas) y `CURVAS`.
+- Tasa con IVA = tasa × 1.16 redondeada a 2 decimales; pagos fijos.
+- Seguro de vida: 0.82% anual sobre el capital, dentro de la mensualidad.
+- Comisión por apertura = % + IVA sobre el monto total a financiar (capital + seguros de los años 2 en adelante), dentro
+  del pago inicial.
+- Desde el mes 13 se suma el seguro de cada año financiado a 12 meses (los meses 13+ son aproximados al centavo).
+- Enganche % sobre precio + GAP.
+
+Pestañas: **Comparativo** (todas las ofertas con el mismo pago inicial y el seguro máximo de cada una), **Seguro**
+(qué oferta conviene según el costo del seguro), **Por plazo** (mensualidades de 12 a 72 meses). Botón **PDF del
+análisis**.
+
+**Cada mes** actualiza en `oferta_mg.py`: `BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche
+sistema y tasas bajas) y `CURVAS`.
 
 ## Archivos
 
