@@ -17,7 +17,7 @@ Reglas (boletín BMGFS-16-10-2026, vigente del 09-oct al 02-nov-2026):
 Cálculo igual al cotizador de Autoexpress (validado contra cotizaciones reales, oct-2026):
   · Pago inicial = enganche del cliente + seguro del primer año (contado) + comisión por apertura.
     Con lo que trae el cliente se despeja el enganche: enganche = pago − seguro − comisión (+ bono si va al enganche).
-  · Enganche % sobre precio + GAP. Capital = precio + GAP − enganche total.
+  · Enganche % sobre precio + GAP (si se incluye). Capital = precio + GAP − enganche total.
   · Comisión por apertura = CXA% + IVA sobre el monto total a financiar (capital + seguro anual × años 2 en adelante).
   · Tasa con IVA = tasa × 1.16 redondeada a 2 decimales; pagos fijos mensuales.
   · Seguro de vida = 0.82% anual sobre el capital, dentro de la mensualidad.
@@ -166,6 +166,24 @@ def ofertas_para(v):
     return ops
 
 
+# GAP: cada rango de precio del vehículo tiene su monto. PENDIENTE: aún no se tiene la tabla.
+# Llénala como [(precio_hasta, monto_gap), ...] en orden ascendente, p. ej. [(400000, 9500), (600000, 13530)].
+# Mientras esté vacía, el GAP queda desactivado en la app y en Colab.
+TABLA_GAP = []
+
+
+def gap_disponible():
+    return bool(TABLA_GAP)
+
+
+def monto_gap(precio):
+    """Monto de GAP para el precio del vehículo; None si no hay tabla o el precio queda fuera de rango."""
+    for hasta, monto in TABLA_GAP:
+        if precio <= hasta:
+            return float(monto)
+    return None
+
+
 def requiere_precio(vehiculo):
     return CATALOGO[vehiculo]["msrp"] is None
 
@@ -289,13 +307,16 @@ def tramos_seguro(ops, n, d, max_filas=8):
     return salida
 
 
-def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_manual=0.0, gap=0.0, iva=True):
-    """pago = todo lo que trae el cliente (enganche + seguro del primer año + comisión por apertura)."""
+def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_manual=0.0, incluir_gap=False,
+             iva=True):
+    """pago = todo lo que trae el cliente (enganche + seguro del primer año + comisión por apertura).
+    incluir_gap: suma el GAP del rango de precio (solo si TABLA_GAP ya tiene montos)."""
     v = CATALOGO[vehiculo]
     precio = precio_manual if precio_manual and precio_manual > 0 else v["msrp"]
     if not precio:
         raise ValueError(f"«{vehiculo}» no tiene precio en el boletín: captura el precio.")
-    d = dict(precio=precio, gap=gap or 0.0, bono=v["bono"], pago=pago, seguro1=seguro1 or 0.0,
+    gap = (monto_gap(precio) or 0.0) if incluir_gap and gap_disponible() else 0.0
+    d = dict(precio=precio, gap=gap, bono=v["bono"], pago=pago, seguro1=seguro1 or 0.0,
              seguro_anual_capturado=seguro_anual or 0.0, seguro_anual=(seguro_anual or seguro1 or 0.0), iva=iva)
     ops = ofertas_para(v)
     evals = {o["nombre"]: evaluar(o, plazo, d) for o in ops}

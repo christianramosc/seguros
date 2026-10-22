@@ -49,7 +49,7 @@ Aseguradoras reconocidas: GNP, Quálitas, Chubb, HDI y Seguros Inbursa.
 ## Mejor oferta MG (pestaña de arriba)
 
 Eliges el auto del boletín de MG Financial Services y capturas **lo que trae el cliente** (pago inicial), el seguro
-del primer año, el seguro anual del resto del plazo, el plazo y, si aplica, precio y GAP. Arriba queda **lo que paga el
+del primer año, el seguro anual del resto del plazo, el plazo y, si aplica, el precio. Arriba queda **lo que paga el
 cliente** con la mejor opción: pago inicial, tasa, mensualidad y plazo.
 
 El enganche se ajusta solo: **pago inicial − seguro del primer año − comisión por apertura (+ bono si va al
@@ -60,14 +60,18 @@ enganche)**. Las mensualidades usan el mismo método del cotizador de Autoexpres
 - Comisión por apertura = % + IVA sobre el monto total a financiar (capital + seguros de los años 2 en adelante), dentro
   del pago inicial.
 - Desde el mes 13 se suma el seguro de cada año financiado a 12 meses (los meses 13+ son aproximados al centavo).
-- Enganche % sobre precio + GAP.
+- Enganche % sobre precio + GAP (si se incluye).
+
+**GAP (pendiente):** la cotización puede llevar GAP o no, y cada rango de precio del vehículo tiene su monto. El
+interruptor «Incluir GAP» queda desactivado hasta cargar la tabla en `oferta_mg.py` (`TABLA_GAP`, lista de
+`(precio_hasta, monto_gap)`); en cuanto tenga montos se activa solo.
 
 Pestañas: **Comparativo** (todas las ofertas con el mismo pago inicial y el seguro máximo de cada una), **Seguro**
 (qué oferta conviene según el costo del seguro), **Por plazo** (mensualidades de 12 a 72 meses). Botón **PDF del
 análisis**.
 
 **Cada mes** actualiza en `oferta_mg.py`: `BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche
-sistema y tasas bajas) y `CURVAS`.
+sistema y tasas bajas), `CURVAS` y, cuando la tengas, `TABLA_GAP`.
 
 ## Archivos
 
