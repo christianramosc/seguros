@@ -8,10 +8,14 @@ Secrets (Streamlit Cloud → Settings → Secrets):
 Si no hay POLIZAS_SHEET_URL se usa SEGUIMIENTO_SHEET_URL (el Sheet de seguimiento de reportessaleu).
 El Sheet debe estar compartido como Editor con el client_email de la cuenta de servicio.
 
+El Excel completo también se guarda en la pestaña oculta RESPALDO (base64 en trozos), para que la app lo abra sola
+aunque se reinicie, sin configurar Drive.
+
 Cada vez que la app guarda el Excel, la pestaña PESTANA se reemplaza completa con una fila por crédito: los datos
 del cliente, el teléfono y su nota, el seguimiento y el estatus calculado ese día. Las demás pestañas del Sheet no se
 tocan.
 """
+import base64
 import datetime as dt
 
 import pandas as pd
@@ -24,6 +28,8 @@ COLUMNAS = ["ESTATUS", "QUÉ HACER", "CIERRA EN", "DÍAS QUE QUEDAN", "CLIENTE",
             "PÓLIZA ACTUAL", "PRIMA ANUAL ACTUAL", "EXTERNA MÁS BARATA", "ASEGURADORA EXTERNA", "AHORRO EXTERNA",
             "NOTA COTIZACIÓN", "VEHÍCULO", "SERIE", "MOTOR", "RFC", "FOLIO CRÉDITO", "MUNICIPIO",
             "DIRECCIÓN", "CP", "PRIMERA OPORTUNIDAD", "FIN DEL CRÉDITO"]
+RESPALDO = "_Polizas_excel"
+TROZO = 45000                       # caracteres por celda (Google admite hasta 50 000)
 TEXTO = {"TELÉFONO", "SERIE", "MOTOR", "RFC", "FOLIO CRÉDITO", "CP", "PÓLIZA ACTUAL"}   # que Google no los haga número
 
 
@@ -108,3 +114,37 @@ def publicar(df):
         return True, f"Copiado al Google Sheet «{libro.title}», pestaña {PESTANA}"
     except Exception as e:
         return False, f"No se pudo copiar al Google Sheet ({e})"
+
+
+def guardar_excel(datos):
+    """Guarda el Excel completo en la pestaña oculta RESPALDO. Devuelve (ok, mensaje)."""
+    if not configurado():
+        return False, "Google Sheet sin configurar"
+    try:
+        import gspread
+        from gspread.utils import ValueInputOption
+        texto = base64.b64encode(datos).decode()
+        filas = [[texto[i:i + TROZO]] for i in range(0, len(texto), TROZO)]
+        libro = _cliente().open_by_url(url())
+        try:
+            ws = libro.worksheet(RESPALDO)
+            ws.clear()
+            ws.resize(rows=len(filas), cols=1)
+        except gspread.WorksheetNotFound:
+            ws = libro.add_worksheet(RESPALDO, rows=len(filas), cols=1)
+            ws.hide()
+        ws.update(filas, "A1", value_input_option=ValueInputOption.raw)   # raw: que Google no lo tome como fórmula
+        return True, "Guardado en el Google Sheet"
+    except Exception as e:
+        return False, f"No se pudo guardar en el Google Sheet ({e})"
+
+
+def leer_excel():
+    """Bytes del Excel guardado en la pestaña RESPALDO, o None."""
+    if not configurado():
+        return None
+    try:
+        datos = base64.b64decode("".join(_cliente().open_by_url(url()).worksheet(RESPALDO).col_values(1)))
+        return datos if datos[:2] == b"PK" else None    # un .xlsx es un ZIP
+    except Exception:
+        return None

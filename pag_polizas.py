@@ -145,8 +145,9 @@ st.caption(f"{len(df)} créditos · fuente: {st.session_state.get('pol_origen', 
 if st.session_state.get("pol_guardado"):
     ok, msg, cuando = st.session_state["pol_guardado"]
     st.caption(f"{':material/cloud_done:' if ok else ':material/save:'} {msg} · {cuando:%H:%M}"
-               + ("" if almacen.drive_configurado() else
-                  " · se conserva mientras la app esté activa; para guardarlo siempre, configura Drive (README)"))
+               + ("" if almacen.permanente() else
+                  " · se conserva mientras la app esté activa; para guardarlo siempre, configura Drive o el Google "
+                  "Sheet (README)"))
 if st.session_state.get("pol_sheet"):
     ok, msg = st.session_state["pol_sheet"]
     st.caption(f"{':material/table_chart:' if ok else ':material/warning:'} {msg}")

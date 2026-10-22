@@ -1,13 +1,16 @@
 """Guarda el último Excel cargado para no tener que subirlo cada vez.
 
-Dos lugares, en este orden:
+Tres lugares, en este orden:
 1. Google Drive (permanente), si en secrets están [gcp_service_account] y POLIZAS_DRIVE_FILE_ID.
    El archivo es tuyo en tu Drive y lo compartes como Editor con el client_email de la cuenta de servicio.
-2. Una copia en el servidor de Streamlit (se borra si la app se reinicia o se duerme por inactividad).
+2. El Google Sheet de hoja_google (permanente), en una pestaña oculta, si está configurado.
+3. Una copia en el servidor de Streamlit (se borra si la app se reinicia o se duerme por inactividad).
 """
 import os
 
 import streamlit as st
+
+import hoja_google
 
 LOCAL = os.path.join(os.path.expanduser("~"), ".polizas_mg", "ultimo.xlsx")
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -35,6 +38,11 @@ def drive_configurado():
         return False
 
 
+def permanente():
+    """True si el Excel se guarda en algún lugar que sobrevive a reinicios de la app."""
+    return drive_configurado() or hoja_google.configurado()
+
+
 def leer():
     """Devuelve (bytes, origen) del último Excel guardado, o (None, None)."""
     if drive_configurado():
@@ -46,6 +54,9 @@ def leer():
                 return r.content, "Google Drive"
         except Exception:
             pass
+    datos = hoja_google.leer_excel()
+    if datos:
+        return datos, "Google Sheet"
     if os.path.exists(LOCAL):
         with open(LOCAL, "rb") as f:
             return f.read(), "copia guardada en la app"
@@ -58,7 +69,9 @@ def guardar(datos):
     with open(LOCAL, "wb") as f:
         f.write(datos)
     if not drive_configurado():
-        return False, "Guardado en la app (sin Drive configurado)"
+        if hoja_google.configurado():
+            return hoja_google.guardar_excel(datos)
+        return False, "Guardado en la app (sin Drive ni Google Sheet configurados)"
     try:
         s, fid = _drive()
         r = s.patch(f"https://www.googleapis.com/upload/drive/v3/files/{fid}",
