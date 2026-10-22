@@ -62,7 +62,10 @@ with st.container(border=True):
     cliente = c8.text_input("Cliente (aparece en el PDF)", key="of_cli")
     iva = st.toggle("IVA sobre intereses", value=True, key="of_iva")
     if v["msrp"]:
-        c1.caption(D(f"Precio de lista {om.money0(v['msrp'])} · bono MG {om.money0(v['bono'])}"))
+        c1.caption(D(f"Precio de lista {om.money0(v['msrp'])} · bono MG {om.money0(v['bono'])}"
+                     + (f" · color {om.COLORES[v['color']]} (sistema {v['color']}%): el cliente aporta desde "
+                        f"{max(v['color'] / 100 - v['bono'] / v['msrp'], om.ENGANCHE_MIN_CLIENTE):.1%}"
+                        if v["color"] else "")))
     else:
         c1.caption("Sin precio en el boletín: captúralo en «Precio».")
 
@@ -97,14 +100,15 @@ elif res["gap"]:
 if ranking:
     _, op, ev = ranking[0]
     st.markdown(f"##### :material/emoji_events: Lo que paga el cliente · mejor opción: **{op['nombre']}**")
-    k = st.columns(4)
+    k = st.columns(5)
     tarjeta(k[0], "account_balance_wallet", "Pago inicial", om.money(pago), om.desglose(ev))
-    tarjeta(k[1], "percent", "Tasa", f"{ev['tasa']:.2f}%",
-            f"{ev['tasa_iva']:.2f}% con IVA · comisión por apertura {op['cxa']:.0%}")
-    tarjeta(k[2], "payments", "Mensualidad", om.money(ev["mens"]),
+    tarjeta(k[1], "savings", "Enganche del cliente", om.money0(ev["eng_cliente"]),
+            f"{ev['pct_cliente']:.1%} del precio" + (f" · total {om.money0(ev['eng_total'])}" if ev["bono_eng"] else ""))
+    tarjeta(k[2], "percent", "Tasa", f"{ev['tasa']:.2f}%",
+            f"{ev['tasa_iva']:.2f}% con IVA · comisión {op['cxa']:.0%}")
+    tarjeta(k[3], "payments", "Mensualidad", om.money(ev["mens"]),
             "Meses 1-12" + (f" · meses 13+: {om.money(ev['mens2'])}" if ev["mens2"] else ""), "#1E7B34")
-    tarjeta(k[3], "event", "Plazo", f"{plazo} meses",
-            f"Enganche {om.money0(ev['eng_total'])} ({ev['pct']:.1%})")
+    tarjeta(k[4], "event", "Plazo", f"{plazo} meses", f"Financiado {om.money0(ev['financiado'])}")
     notas = [f"Baremo **{op['baremo']}** · bono **{ev['forma']}**"
              + (f" **{om.money0(ev['bono_eng'])}** (enganche del cliente {om.money0(ev['eng_cliente'])} + bono)"
                 if ev["bono_eng"] else "") + f" · financiado **{om.money(ev['financiado'])}** · "
@@ -124,8 +128,25 @@ elif res["seguro_anual_estimado"]:
     st.caption(":material/info: Seguro anual del resto del plazo estimado igual al del primer año (meses 13+).")
 
 # ----------------------------------------------------------------------------- detalle
-t_rank, t_seg, t_plazo = st.tabs([":material/leaderboard: Comparativo", ":material/shield: Seguro",
-                                  ":material/calendar_view_month: Por plazo"])
+t_rank, t_oferta, t_seg, t_plazo = st.tabs([":material/leaderboard: Comparativo", ":material/sell: Oferta del auto",
+                                            ":material/shield: Seguro", ":material/calendar_view_month: Por plazo"])
+
+with t_oferta:
+    st.markdown(D(res["descripcion"]))
+    req = pd.DataFrame([{
+        "Oferta": q["oferta"], "Mínimo real cliente": f"{q['min_cliente']:.1%}",
+        "Monto mínimo cliente": om.money0(q["min_cliente_monto"]),
+        f"Pago inicial mínimo ({plazo} m)": om.money0(q["pago_min"])
+        + ("" if q["plazo_pago_min"] == plazo else f" ({q['plazo_pago_min']} m)"),
+        "Mínimo sistema": f"{q['min_sistema']:.0%}" + (f" a <{q['min_max']:.0%}" if q["min_max"] else ""),
+        "Bono": q["bono"], "Comisión": f"{q['cxa']:.0%}", "Tasas por plazo": q["tasas"], "Baremo": q["baremo"]}
+        for q in res["requisitos"]])
+    st.dataframe(req, hide_index=True, width="stretch",
+                 column_config={"Oferta": st.column_config.TextColumn("Oferta", width="medium"),
+                                "Tasas por plazo": st.column_config.TextColumn("Tasas por plazo", width="large")})
+    st.caption("Eng. mínimo real del cliente: lo que pone de su bolsa. Con bono al enganche = enganche sistema − % del "
+               "bono (mínimo 10%); en Tasa Baja el bono va a la tasa y el cliente pone todo el enganche. El pago "
+               "inicial mínimo suma el seguro del primer año y la comisión por apertura con lo capturado arriba.")
 
 with t_rank:
     st.caption("Con el mismo pago inicial en todas: el enganche se ajusta a lo que queda después del seguro y la "
@@ -134,8 +155,9 @@ with t_rank:
     for i, (t, o, e) in enumerate(ranking, 1):
         filas.append({"#": str(i), "Oferta": o["nombre"], "Mens. 1-12": om.money(e["mens"]),
                       "Mens. 13+": om.money(e["mens2"]), "Tasa": f"{e['tasa']:.2f}%",
-                      "Tasa c/IVA": f"{e['tasa_iva']:.2f}%", "Enganche": om.money0(e["eng_total"]),
-                      "Eng. %": f"{e['pct']:.1%}", "Bono": e["forma"], "Comisión": om.money(e["cxa"]),
+                      "Tasa c/IVA": f"{e['tasa_iva']:.2f}%", "Eng. cliente": om.money0(e["eng_cliente"]),
+                      "% cliente": f"{e['pct_cliente']:.1%}", "Eng. total": om.money0(e["eng_total"]),
+                      "% total": f"{e['pct']:.1%}", "Bono": e["forma"], "Comisión": om.money(e["cxa"]),
                       "Financiado": om.money0(e["financiado"]), "Total mensualidades": om.money(t),
                       "Baremo": o["baremo"], "Seguro permitido": om.texto_rango(res["rangos"][o["nombre"]])})
     if filas:
@@ -214,10 +236,11 @@ with t_plazo:
             continue
         o, e = m
         mp.append({"Plazo": f"{n} meses", "Mejor oferta": o["nombre"], "Pago inicial": pago,
-                   "Tasa": f"{e['tasa']:.2f}%", "Enganche": e["eng_total"], "Comisión": e["cxa"],
+                   "Tasa": f"{e['tasa']:.2f}%", "Eng. cliente": e["eng_cliente"],
+                   "% cliente": f"{e['pct_cliente']:.1%}", "Eng. total": e["eng_total"], "Comisión": e["cxa"],
                    "Mens. 1-12": e["mens"], "Mens. 13+": e["mens2"], "Total mensualidades": e["total"]})
     st.dataframe(pd.DataFrame(mp), hide_index=True, width="stretch",
-                 column_config={c: DOLAR(c) for c in ["Pago inicial", "Enganche", "Comisión", "Mens. 1-12",
+                 column_config={c: DOLAR(c) for c in ["Pago inicial", "Eng. cliente", "Eng. total", "Comisión", "Mens. 1-12",
                                                       "Mens. 13+", "Total mensualidades"]})
 
 # ----------------------------------------------------------------------------- PDF
