@@ -45,7 +45,11 @@ with st.container(border=True):
     precio_manual = c6.number_input("Precio (si es distinto al de lista)", min_value=0, value=0, step=1000,
                                     key="of_precio",
                                     help="Obligatorio en los modelos de Lanzamiento y «Otro». 0 = precio de lista.")
-    gap = c7.number_input("GAP (se suma al precio)", min_value=0.0, value=0.0, step=500.0, key="of_gap")
+    c7.markdown("<div style='height:1.9rem'></div>", unsafe_allow_html=True)
+    incluir_gap = c7.toggle("Incluir GAP", value=False, key="of_gap", disabled=not om.gap_disponible(),
+                            help="El GAP se suma al precio para el enganche y se financia. Cada rango de precio "
+                                 "tiene su monto." + ("" if om.gap_disponible() else
+                                 " Pendiente: falta cargar la tabla de montos de GAP (TABLA_GAP en oferta_mg.py)."))
     cliente = c8.text_input("Cliente (aparece en el PDF)", key="of_cli")
     iva = st.toggle("IVA sobre intereses", value=True, key="of_iva")
     if v["msrp"]:
@@ -72,9 +76,13 @@ def pdf(a, cliente):
     return om.pdf_bytes(correr(*a), cliente)
 
 
-args = (veh, float(pago), float(seguro1), float(seguro_anual), int(plazo), float(precio_manual), float(gap), iva)
+args = (veh, float(pago), float(seguro1), float(seguro_anual), int(plazo), float(precio_manual), incluir_gap, iva)
 res = correr(*args)
 ranking = res["ranking"]
+if incluir_gap and not res["gap"]:
+    st.warning("Este precio no tiene monto de GAP en la tabla: se calcula sin GAP.")
+elif res["gap"]:
+    st.caption(D(f":material/shield_with_heart: Incluye GAP de {om.money(res['gap'])} (se suma al precio y se financia)."))
 
 # ----------------------------------------------------------------------------- lo que paga el cliente
 if ranking:
