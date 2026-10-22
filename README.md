@@ -138,11 +138,12 @@ para la más barata: en el PDF salen tachadas como *omitida*.
 
 ## Copia en Google Sheets (para consultar y usar en otras apps)
 
-Si en Secrets están `[gcp_service_account]` y `SEGUIMIENTO_SHEET_URL` (o `POLIZAS_SHEET_URL`), cada vez que cargas
-el Excel o das **Guardar y actualizar estatus**, la app reemplaza la pestaña **Polizas** de ese Google Sheet con una
+Si en Secrets están `[gcp_service_account]` y `SEGUIMIENTO_SHEET_URL` (o `POLIZAS_SHEET_URL`), cada vez que abres
+la app (con el último Excel guardado), cargas el Excel o das **Guardar y actualizar estatus**, la app reemplaza la pestaña **Polizas** de ese Google Sheet con una
 fila por crédito: cliente, teléfono y su nota, seguimiento, fechas y el estatus calculado ese día (columna
 `ACTUALIZADO`). Las demás pestañas no se tocan. Con los mismos secrets de `reportessaleu` se usa su mismo Sheet; desde
-esa app se lee como cualquier otra pestaña (`libro.worksheet("Polizas")`).
+esa app se lee como cualquier otra pestaña (`libro.worksheet("Polizas")`). Arriba de la página Pólizas se ve «Conectado a <Sheet> · abrir»
+(igual que en `reportessaleu`) o el motivo por el que no se puede copiar.
 
 ## Guardar el Excel para no subirlo cada vez
 

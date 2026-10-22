@@ -30,13 +30,19 @@ MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto
 hoy = dt.date.today()
 hero("Pólizas de seguro · MG Colima", "A quién llamar para póliza externa, pago de contado o fin de crédito.",
      f"Corte {hoy:%d/%m/%Y}")
+hoja_google.panel()
 
 # ----------------------------------------------------------------------------- carga
 def guardar_actual():
     """Guarda el Excel con el seguimiento actual para la próxima vez que se abra la app."""
     ok, msg = almacen.guardar(st.session_state["pol_excel"])
     st.session_state["pol_guardado"] = (ok, msg, dt.datetime.now())
-    if hoja_google.configurado():   # copia para consulta en el Google Sheet (pestaña Polizas)
+    copiar_al_sheet()
+
+
+def copiar_al_sheet():
+    """Copia para consulta en el Google Sheet (pestaña Polizas), con el estatus calculado hoy."""
+    if hoja_google.configurado():
         with st.spinner("Copiando al Google Sheet…"):
             st.session_state["pol_sheet"] = hoja_google.publicar(ps.calcular(st.session_state["pol_base"],
                                                                             dt.date.today()))
@@ -52,6 +58,8 @@ if st.session_state.get("pol_base") is None and not st.session_state.get("pol_au
             st.session_state.update(pol_base=base, pol_excel=excel, pol_err=errores, pol_origen=f"último Excel ({origen})")
         except Exception:
             pass
+        else:
+            copiar_al_sheet()   # al abrir también: la pestaña Polizas queda con el estatus de hoy
 
 with st.container(border=True):
     c1, c2, c3 = st.columns([3, 2, 2])
