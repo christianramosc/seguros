@@ -160,12 +160,31 @@ with t_oferta:
                "bono (mínimo 10%); en Tasa Baja el bono va a la tasa y el cliente pone todo el enganche. Desembolso "
                "mínimo = enganche propio + seguro año 1 + GAP contado + comisión; pago inicial mínimo = desembolso + "
                "bono al enganche (como lo muestra la cotización).")
+    st.markdown("**Mensualidad con el enganche mínimo, de 12 meses al plazo máximo**")
+    mm, marca_mm = [], []
+    for o in res["ops"]:
+        fila, fm = {"Oferta": o["nombre"]}, {}
+        for n in om.PLAZOS:
+            e = res["mens_min"][o["nombre"]][n]
+            fila[f"{n} m"] = f"{om.money(e['mens'])} ({e['tasa']:.2f}%)" if e else "—"
+            fm[f"{n} m"] = e["mens"] if e else None
+        mm.append(fila)
+        marca_mm.append(fm)
+    df_mm, df_mmv = pd.DataFrame(mm), pd.DataFrame(marca_mm)
+    st.dataframe(df_mm.style.apply(lambda col: [VERDE if col.name in df_mmv and pd.notna(df_mmv.loc[i, col.name])
+                                                and df_mmv.loc[i, col.name] == df_mmv[col.name].min() else ""
+                                                for i in col.index], axis=0),
+                 hide_index=True, width="stretch",
+                 column_config={"Oferta": st.column_config.TextColumn("Oferta", width="large")})
+    st.caption("Meses 1-12 con el desembolso mínimo de cada plan en cada plazo (incluye el seguro y el GAP "
+               "capturados); entre paréntesis la tasa sin IVA. «—»: el plan no maneja ese plazo. En verde, la menor "
+               "en cada plazo.")
     st.download_button("PDF de mínimos de toda la oferta", pdf_minimos(om.BOLETIN, iva),
                        file_name=f"Minimos_oferta_MG_{om.BOLETIN}.pdf", mime="application/pdf",
                        icon=":material/table_view:",
                        help="Todos los autos y planes del boletín: enganche mínimo del sistema y real del cliente, "
                             "desembolso y pago inicial mínimos (+ seguro de contado) y mensualidades con el "
-                            "enganche mínimo.")
+                            "enganche mínimo de 12 meses al plazo máximo.")
 
 with t_rank:
     st.caption("Con el mismo desembolso del cliente en todas: el enganche se ajusta a lo que queda después del seguro "
