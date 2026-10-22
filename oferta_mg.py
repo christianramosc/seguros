@@ -217,7 +217,8 @@ def mensualidad(monto, tasa_anual_pct, n, iva=True):
 
 def evaluar(op, n, d):
     """Cotiza la oferta `op` a `n` meses con los datos `d` (precio, gap financiado, gap_contado, bono, pago =
-    desembolso del cliente, seguro1, seguro_anual, iva). El enganche se despeja del desembolso del cliente.
+    desembolso del cliente, seguro1, seguro_anual, iva). El enganche se despeja del desembolso del cliente. Si `d`
+    trae `pago_inicial`, ese es el fijo y el desembolso de cada forma del bono = pago inicial − bono al enganche.
     None si la oferta no maneja ese plazo."""
     if n not in op["tasas"]:
         return None
@@ -226,11 +227,14 @@ def evaluar(op, n, d):
     precio, gap, bono, sa = d["precio"], d["gap"], d["bono"], d["seguro_anual"]
     if op["modo"] in ("tasa", "sin_bono"):
         candidatos = [("a tasa" if op["modo"] == "tasa" else "sin bono", precio + gap, 0.0)]
+    elif d.get("pago_inicial"):   # el pago inicial capturado ya trae el bono al enganche (como en la cotización)
+        candidatos = [("al enganche", precio + gap, bono)]
     else:
         candidatos = [("al enganche", precio + gap, bono), ("al precio", precio - bono + gap, 0.0)]
     primero = None
     for forma, base, bono_eng in candidatos:
-        eng_cli = (d["pago"] - d["seguro1"] - d["gap_contado"] - c * (base - bono_eng + sa * anios)) / (1 - c)
+        pago = d["pago_inicial"] - bono_eng if d.get("pago_inicial") else d["pago"]
+        eng_cli = (pago - d["seguro1"] - d["gap_contado"] - c * (base - bono_eng + sa * anios)) / (1 - c)
         eng_tot = eng_cli + bono_eng
         cap = base - eng_tot
         pct = eng_tot / base
@@ -261,7 +265,7 @@ def evaluar(op, n, d):
                  bono_eng=bono_eng, eng_total=eng_tot, financiado=cap, monto_total=cap + sa * anios,
                  cxa=c * (cap + sa * anios), tasa=op["tasas"][n], tasa_iva=ti, pago_capital=pm, vida=vida1,
                  mens=m1, mens2=m2, total=total, plazo=n, seguro1=d["seguro1"], gap_contado=d["gap_contado"],
-                 desembolso=d["pago"], pago_inicial=eng_tot + c * (cap + sa * anios) + d["seguro1"] + d["gap_contado"])
+                 desembolso=pago, pago_inicial=eng_tot + c * (cap + sa * anios) + d["seguro1"] + d["gap_contado"])
         if r["valida"]:
             return r
         primero = primero or r
@@ -282,9 +286,14 @@ def _con_seguro(d, s):
     return dict(d, seguro1=s, seguro_anual=d["seguro_anual_capturado"] or s)
 
 
+def tope_seguro(d):
+    """Hasta dónde puede llegar el seguro: lo capturado (pago inicial o desembolso)."""
+    return int(d.get("pago_inicial") or d["pago"])
+
+
 def rango_seguro(op, n, d):
     """Rango del seguro del primer año (de $10 en $10) en el que la oferta es válida; None si nunca."""
-    validos = [s for s in range(0, int(d["pago"]) + 1, 10)
+    validos = [s for s in range(0, tope_seguro(d) + 1, 10)
                if (ev := evaluar(op, n, _con_seguro(d, s))) and ev["valida"]]
     return (validos[0], validos[-1]) if validos else None
 
@@ -292,7 +301,7 @@ def rango_seguro(op, n, d):
 def tramos_seguro(ops, n, d, max_filas=8):
     """Tramos del costo del seguro del primer año con la mejor oferta en cada uno."""
     crudos, actual = [], None
-    for s in range(0, int(d["pago"]) + 1, 10):
+    for s in range(0, tope_seguro(d) + 1, 10):
         m = mejor_en(ops, n, _con_seguro(d, s))
         clave = m[0]["nombre"] if m else None
         if actual is None or clave != actual["oferta"]:
@@ -307,7 +316,7 @@ def tramos_seguro(ops, n, d, max_filas=8):
     for t in crudos:
         if t["oferta"] is None:
             salida.append(dict(t, mens_min=None, mens_max=None))
-            if t["desde"] > d["pago"] * 0.5:
+            if t["desde"] > tope_seguro(d) * 0.5:
                 break
         else:
             op = next(o for o in ops if o["nombre"] == t["oferta"])
@@ -361,7 +370,7 @@ def mens_minimo(op, d):
     for n in PLAZOS:
         e = None
         if n in op["tasas"]:
-            e = evaluar(op, n, dict(d, pago=requisito(op, d, n)["desembolso_min"]))
+            e = evaluar(op, n, dict(d, pago=requisito(op, d, n)["desembolso_min"], pago_inicial=0.0))
         salida[n] = e if e and e["valida"] else None
     return salida
 
@@ -393,8 +402,10 @@ GAP_MODOS = ("No", "Contado", "Financiado")
 
 
 def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_manual=0.0, gap_modo="No",
-             iva=True):
+             iva=True, pago_inicial=0.0):
     """pago = desembolso del cliente: lo que pone de su bolsa (pago inicial − bono al enganche).
+    pago_inicial: si se captura (> 0) manda sobre `pago`: es el pago inicial de la cotización y el desembolso de cada
+    plan sale de él (− bono al enganche si el plan lo lleva).
     gap_modo: «No», «Contado» (va en el pago inicial) o «Financiado» (se suma al precio); el monto sale de TABLA_GAP
     y solo aplica si ya tiene montos."""
     v = CATALOGO[vehiculo]
@@ -403,7 +414,8 @@ def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_man
         raise ValueError(f"«{vehiculo}» no tiene precio en el boletín: captura el precio.")
     gap = (monto_gap(precio) or 0.0) if gap_modo != "No" and gap_disponible() else 0.0
     d = dict(precio=precio, gap=gap if gap_modo == "Financiado" else 0.0,
-             gap_contado=gap if gap_modo == "Contado" else 0.0, bono=v["bono"], pago=pago, seguro1=seguro1 or 0.0,
+             gap_contado=gap if gap_modo == "Contado" else 0.0, bono=v["bono"], pago=pago_inicial or pago,
+             pago_inicial=pago_inicial or 0.0, seguro1=seguro1 or 0.0,
              seguro_anual_capturado=seguro_anual or 0.0, seguro_anual=(seguro_anual or seguro1 or 0.0), iva=iva)
     ops = ofertas_para(v)
     evals = {o["nombre"]: evaluar(o, plazo, d) for o in ops}
@@ -413,7 +425,8 @@ def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_man
     mejores = {n: mejor_en(ops, n, d) for n in PLAZOS}
     rangos = {o["nombre"]: (rango_seguro(o, plazo, d) if plazo in o["tasas"] else None) for o in ops}
     return dict(vehiculo=vehiculo, precio=precio, bono=v["bono"], gap=gap, gap_modo=gap_modo if gap else "No",
-                pago=pago, seguro=d["seguro1"],
+                pago=(ranking[0][2]["desembolso"] if ranking else pago) if pago_inicial else pago,
+                pago_inicial=pago_inicial or 0.0, tope_seguro=tope_seguro(d), seguro=d["seguro1"],
                 seguro_anual=d["seguro_anual"], seguro_anual_estimado=not seguro_anual and bool(seguro1),
                 plazo=plazo, iva=iva, ops=ops, evals=evals, ranking=ranking, matriz=matriz, mejores=mejores,
                 rangos=rangos, tramos=tramos_seguro(ops, plazo, d),
@@ -532,7 +545,7 @@ def pdf_bytes(res, cliente=""):
         story.append(P(f"LO QUE PAGA EL CLIENTE · MEJOR OPCIÓN: {op['nombre'].upper()}", st("r0", 9, ROJO, True)))
         story.append(Spacer(1, 4))
         datos = [("PAGO INICIAL", money(ev["pago_inicial"]), desglose(ev)),
-                 ("DESEMBOLSO DEL CLIENTE", money(pago), desglose_desembolso(ev)),
+                 ("DESEMBOLSO DEL CLIENTE", money(ev["desembolso"]), desglose_desembolso(ev)),
                  ("TASA", f"{ev['tasa']:.2f}%", f"{ev['tasa_iva']:.2f}% con IVA · comisión {op['cxa']:.0%}"),
                  ("MENSUALIDAD", money(ev["mens"]),
                   "meses 1-12" + (f" · meses 13+: {money(ev['mens2'])}" if ev["mens2"] else "")),
@@ -628,14 +641,16 @@ def pdf_bytes(res, cliente=""):
     # --- Seguro
     tramos = res["tramos"]
     story.append(P("¿Cuánto puede valer el seguro del primer año?", s_h2))
-    story.append(P(f"El seguro se paga de contado con el desembolso del cliente ({money0(pago)}): entre más cuesta, menos "
+    story.append(P(f"El seguro se paga de contado con "
+                   + (f"el pago inicial ({money0(res['pago_inicial'])})" if res["pago_inicial"] else
+                      f"el desembolso del cliente ({money0(pago)})") + ": entre más cuesta, menos "
                    f"enganche queda. Mejor oferta a {plazo} meses según el costo del seguro"
                    + ("" if res["seguro_anual_estimado"] is False and res["seguro_anual"] else
                       " (el seguro anual del resto del plazo se toma igual al del primer año)") + ".", s_p))
     story.append(Spacer(1, 8))
     validos = [t for t in tramos if t["oferta"]]
     if validos:
-        tope = min(pago, max(t["hasta"] for t in validos) * 1.08 + 1)
+        tope = min(res["tope_seguro"], max(t["hasta"] for t in validos) * 1.08 + 1)
         nombres = list(dict.fromkeys(t["oferta"] for t in validos))
         color_de = {n: PALETA[i % len(PALETA)] for i, n in enumerate(nombres)}
         d = Drawing(ancho, 52)

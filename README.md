@@ -49,8 +49,13 @@ Aseguradoras reconocidas: GNP, Quálitas, Chubb, HDI y Seguros Inbursa.
 ## Mejor oferta MG (pestaña de arriba)
 
 Eliges el auto del boletín de MG Financial Services y capturas el **desembolso del cliente** (lo que pone de su
-bolsa), el seguro del primer año, el seguro anual del resto del plazo, el plazo y, si aplica, el precio. Arriba queda
-la mejor opción: pago inicial, desembolso, tasa, mensualidad y plazo.
+bolsa) **o el pago inicial** de la cotización —el otro se calcula y queda bloqueado—, el seguro del primer año, el
+seguro anual del resto del plazo, el plazo y, si aplica, el precio. Arriba queda la mejor opción: pago inicial,
+desembolso, tasa, mensualidad y plazo, y abajo **hasta cuánto puede valer la póliza** (seguro año 1) en cada plan para
+que cumpla sus condiciones. Ej.: MG5 2027 1.5L COM EXCITE MT con pago inicial de $120,000 → desembolso $60,000 (bono
+de $60,000 al enganche) y, en el plan 17.74%, la póliza puede valer hasta $16,800 (enganche 30% = $103,200).
+Con pago inicial capturado, los planes de bono flexible llevan el bono al enganche (como en la cotización); en Tasa
+Baja el bono va a la tasa y el desembolso es todo el pago inicial.
 
 - **Pago inicial** (igual que la cotización) = enganche + comisión por contratación del crédito + seguro contado año
   1 + GAP contado. El enganche incluye el bono cuando va al enganche.
