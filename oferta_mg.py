@@ -12,8 +12,9 @@ Reglas (boletín BMGFS-16-10-2026, vigente del 09-oct al 02-nov-2026):
   · Bono flexible (Estándar / 12.09%): bono al enganche o al precio; el enganche mínimo de los vehículos con bono
     INCLUYE el bono aplicado al enganche.
   · Enganche < 20% → +4% a la tasa (plan 17.74% para modelos sin bono, desde 10%). Enganche máximo 75%.
-  · Enganche mínimo real del cliente (bono al enganche) = enganche sistema − % del bono, nunca menos de 10%
-    (coincide con la columna «Enganche mínimo real del cliente» de la tabla de bonos).
+  · Enganche mínimo real del cliente (bono al enganche) = enganche sistema − % del bono, exacto. La columna
+    «Enganche mínimo real del cliente» del boletín lo redondea (p. ej. 9.96% aparece como 10%); el cotizador acepta
+    el mínimo exacto del sistema (validado: MG5 Elegance AT, plan 414, enganche 25% = $99,750 con bono de $60,000).
   · No incluye Anualidades, University ni Seminuevos.
 
 Cálculo igual al cotizador de Autoexpress (validado contra cotizaciones reales, oct-2026):
@@ -115,7 +116,7 @@ CATALOGO = {
 }
 
 ENGANCHE_MAX = 0.75
-ENGANCHE_MIN_CLIENTE = 0.10   # «se deberá verificar que el cliente aporte 10% de enganche mínimo»
+ENGANCHE_MIN_CLIENTE = 0.10   # referencia del boletín (redondeada); el cotizador acepta el mínimo exacto del sistema
 COLORES = {20: "gris", 25: "amarillo", 30: "azul", 40: "verde"}   # color en la tabla de bonos = enganche sistema
 
 def curva_a_dict(curva):
@@ -244,8 +245,6 @@ def evaluar(op, n, d):
             motivo = "El desembolso no alcanza para seguro y comisión"
         elif pct < op["min"] - 1e-9:
             motivo = f"Enganche {pct:.2%} menor al mínimo {op['min']:.0%}"
-        elif pct_cli < ENGANCHE_MIN_CLIENTE - 1e-9:
-            motivo = f"El cliente aporta {pct_cli:.2%}: mínimo {ENGANCHE_MIN_CLIENTE:.0%}"
         elif op["max"] is not None and pct >= op["max"] - 1e-9:
             motivo = f"Enganche {pct:.1%}: aplica desde {op['max']:.0%} otra tasa"
         elif pct > ENGANCHE_MAX + 1e-9:
@@ -346,11 +345,11 @@ def requisito(op, d, n=None):
     base = precio + gap
     if op["modo"] == "flexible":
         bono_eng = bono
-        cli_pct = max(op["min"] - bono / base, ENGANCHE_MIN_CLIENTE)
+        cli_pct = op["min"] - bono / base
         forma = "al enganche o al precio"
     else:
         bono_eng = 0.0
-        cli_pct = max(op["min"], ENGANCHE_MIN_CLIENTE if op["modo"] == "sin_bono" else 0)
+        cli_pct = op["min"]
         forma = "a la tasa (ya incluido)" if op["modo"] == "tasa" else "sin bono"
     cli_monto = cli_pct * base
     n = n if n in op["tasas"] else max(op["tasas"])
@@ -380,12 +379,12 @@ def describir(vehiculo, precio, bono):
     v = CATALOGO[vehiculo]
     if v["color"]:
         pct_b = bono / precio
-        real = max(v["color"] / 100 - pct_b, ENGANCHE_MIN_CLIENTE)
+        real = v["color"] / 100 - pct_b
         txt = (f"Marcado en {COLORES[v['color']]} en la tabla de bonos (enganche sistema {v['color']}%). Bono MG de "
                f"{money0(bono)} ({pct_b:.1%} del precio de lista {money0(precio)}), pagado 100% por MG Motors "
                f"México. El bono se usa de una sola forma: a la tasa (planes de Tasa Baja: el cliente paga precio de "
                f"lista y aporta todo el enganche) o al enganche / al precio (planes Estándar y Especial, bono "
-               f"flexible). Con el bono al enganche el cliente aporta desde {real:.1%} ({money0(real * precio)}) "
+               f"flexible). Con el bono al enganche el cliente aporta desde {real:.2%} ({money0(real * precio)}) "
                f"y el bono completa el {v['color']}% del sistema en el plan 17.74%; los planes 13.74% y 12.09% piden "
                f"{v['color'] + 10}% y {v['color'] + 20}%.")
     elif v["lanz"]:
@@ -394,7 +393,7 @@ def describir(vehiculo, precio, bono):
     else:
         txt = ("Sin bono en la tabla de bonos: aplican los planes de toda la gama (13.74% desde 20%, 17.74% de 10% a "
                "menos de 20%, 12.09% desde 30%).")
-    return txt + (" Enganche mínimo real del cliente 10%; máximo 75%. Enganche menor a 20%: +4% a la tasa. "
+    return txt + (" Enganche máximo 75%. Enganche menor a 20%: +4% a la tasa. "
                   f"Oferta vigente {VIGENCIA}.")
 
 
@@ -623,7 +622,7 @@ def pdf_bytes(res, cliente=""):
         filas_o.append([P(f"{q['oferta']}<br/><font size=6.5 color='#5A5A5A'>Baremo {q['baremo']}</font>"),
                         P(q["tasas"], st("tz", 7.5, NEGRO, leading=9.5)), P(f"{q['cxa']:.0%}", s_cell_c),
                         P(q["bono"], s_cell_c), P(sis, s_cell_c),
-                        P(f"<b>{q['min_cliente']:.1%}</b><br/>{money0(q['min_cliente_monto'])}", s_cell_c),
+                        P(f"<b>{q['min_cliente']:.2%}</b><br/>{money0(q['min_cliente_monto'])}", s_cell_c),
                         P(money0(q["desembolso_min"]) + otro, s_cell_c),
                         P(money0(q["pago_inicial_min"]) + otro, s_cell_c)])
     to = Table(filas_o, colWidths=[ancho * x for x in (0.2, 0.22, 0.06, 0.1, 0.08, 0.11, 0.115, 0.115)],
@@ -633,7 +632,7 @@ def pdf_bytes(res, cliente=""):
                             ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
     story += [to, Spacer(1, 4),
               P("Eng. mínimo real del cliente: lo que el cliente pone de su bolsa. Con bono al enganche = enganche "
-                "sistema − % del bono (mínimo 10%); en Tasa Baja el bono va a la tasa y el cliente pone todo el "
+                "sistema − % del bono (exacto; el boletín lo redondea); en Tasa Baja el bono va a la tasa y el cliente pone todo el "
                 "enganche. Desembolso mínimo = enganche propio + seguro año 1 + GAP contado + comisión; pago inicial "
                 "mínimo = desembolso + bono al enganche (como lo muestra la cotización).", s_small),
               Spacer(1, 14)]
@@ -747,12 +746,11 @@ def tabla_minimos(iva=True):
                             pago_inicial_min=q["pago_inicial_min"], financiado=emax["financiado"],
                             mens={n: (e["mens"] if e else None) for n, e in mens_minimo(op, d).items()})
             else:
-                fila.update(min_cliente=max(op["min"], ENGANCHE_MIN_CLIENTE if op["modo"] != "tasa" else 0))
+                fila.update(min_cliente=op["min"])
             planes.append(fila)
         salida.append(dict(vehiculo=veh, precio=precio, bono=v["bono"], color=COLORES.get(v["color"]),
                            sistema=v["color"], lanz=v["lanz"], planes=planes,
-                           min_real=(max(v["color"] / 100 - v["bono"] / precio, ENGANCHE_MIN_CLIENTE)
-                                     if v["color"] else None)))
+                           min_real=(v["color"] / 100 - v["bono"] / precio if v["color"] else None)))
     return salida
 
 
@@ -828,7 +826,7 @@ def pdf_minimos(iva=True):
             det = f"precio {money0(a['precio'])}"
             if a["bono"]:
                 det += (f" · bono {money0(a['bono'])} ({a['bono'] / a['precio']:.1%}) · color {a['color']} "
-                        f"(sistema {a['sistema']}%) · el cliente aporta desde {a['min_real']:.1%}")
+                        f"(sistema {a['sistema']}%) · el cliente aporta desde {a['min_real']:.2%}")
             else:
                 det += " · sin bono"
         else:
@@ -853,7 +851,7 @@ def pdf_minimos(iva=True):
                     f"{q['cxa']:.0%} · bono {q['bono']}</font>")
             if a["precio"]:
                 fila = [P(plan), P(sis, s_cc),
-                        P(f"<b>{q['min_cliente']:.1%}</b><br/>{money0(q['min_cliente_monto'])}", s_cc),
+                        P(f"<b>{q['min_cliente']:.2%}</b><br/>{money0(q['min_cliente_monto'])}", s_cc),
                         P(money0(q["comision"]), s_cc), P(money0(q["desembolso_min"]) + MAS, s_cb),
                         P(money0(q["pago_inicial_min"]) + MAS, s_cb), P(money0(q["financiado"]), s_cc)]
                 for j, n in enumerate(PLAZOS):
@@ -862,7 +860,7 @@ def pdf_minimos(iva=True):
                     if m and menor[n] is not None and abs(m - menor[n]) < 0.005:
                         est.append(("BACKGROUND", (c0 + j, r), (c0 + j, r), VERDE))
             else:
-                fila = [P(plan), P(sis, s_cc), P(f"<b>{q['min_cliente']:.1%}</b>", s_cc)] + [P("—", s_cc)] * 4
+                fila = [P(plan), P(sis, s_cc), P(f"<b>{q['min_cliente']:.2%}</b>", s_cc)] + [P("—", s_cc)] * 4
                 fila += [P(f"{q['tasas'][n]:.2f}%", s_cc) if n in q["tasas"] else P("—", s_cc) for n in PLAZOS]
             filas.append(fila)
             est.append(("LINEBELOW", (0, r), (-1, r), 0.3, GRIS2))

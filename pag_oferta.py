@@ -90,7 +90,7 @@ with st.container(border=True):
     if v["msrp"]:
         c1.caption(D(f"Precio de lista {om.money0(v['msrp'])} · bono MG {om.money0(v['bono'])}"
                      + (f" · color {om.COLORES[v['color']]} (sistema {v['color']}%): el cliente aporta desde "
-                        f"{max(v['color'] / 100 - v['bono'] / v['msrp'], om.ENGANCHE_MIN_CLIENTE):.1%}"
+                        f"{v['color'] / 100 - v['bono'] / v['msrp']:.2%}"
                         if v["color"] else "")))
     else:
         c1.caption("Sin precio en el boletín: captúralo en «Precio».")
@@ -192,7 +192,7 @@ t_rank, t_oferta, t_seg, t_plazo = st.tabs([":material/leaderboard: Comparativo"
 with t_oferta:
     st.markdown(D(res["descripcion"]))
     req = pd.DataFrame([{
-        "Oferta": q["oferta"], "Mínimo real cliente": f"{q['min_cliente']:.1%}",
+        "Oferta": q["oferta"], "Mínimo real cliente": f"{q['min_cliente']:.2%}",
         "Monto mínimo cliente": om.money0(q["min_cliente_monto"]),
         f"Desembolso mínimo ({plazo} m)": om.money0(q["desembolso_min"])
         + ("" if q["plazo_pago_min"] == plazo else f" ({q['plazo_pago_min']} m)"),
@@ -205,7 +205,7 @@ with t_oferta:
                  column_config={"Oferta": st.column_config.TextColumn("Oferta", width="medium"),
                                 "Tasas por plazo": st.column_config.TextColumn("Tasas por plazo", width="large")})
     st.caption("Eng. mínimo real del cliente: lo que pone de su bolsa. Con bono al enganche = enganche sistema − % del "
-               "bono (mínimo 10%); en Tasa Baja el bono va a la tasa y el cliente pone todo el enganche. Desembolso "
+               "bono, exacto (el boletín lo redondea, p. ej. 9.96% → 10%); en Tasa Baja el bono va a la tasa y el cliente pone todo el enganche. Desembolso "
                "mínimo = enganche propio + seguro año 1 + GAP contado + comisión; pago inicial mínimo = desembolso + "
                "bono al enganche (como lo muestra la cotización).")
     st.markdown("**Mensualidad con el enganche mínimo, de 12 meses al plazo máximo**")
