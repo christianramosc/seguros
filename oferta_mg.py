@@ -12,6 +12,8 @@ Reglas (boletín BMGFS-16-10-2026, vigente del 09-oct al 02-nov-2026):
   · Bono flexible (Estándar / 12.09%): bono al enganche o al precio; el enganche mínimo de los vehículos con bono
     INCLUYE el bono aplicado al enganche.
   · Enganche < 20% → +4% a la tasa (plan 17.74% para modelos sin bono, desde 10%). Enganche máximo 75%.
+  · Enganche mínimo real del cliente (bono al enganche) = enganche sistema − % del bono, nunca menos de 10%
+    (coincide con la columna «Enganche mínimo real del cliente» de la tabla de bonos).
   · No incluye Anualidades, University ni Seminuevos.
 
 Cálculo igual al cotizador de Autoexpress (validado contra cotizaciones reales, oct-2026):
@@ -111,6 +113,8 @@ CATALOGO = {
 }
 
 ENGANCHE_MAX = 0.75
+ENGANCHE_MIN_CLIENTE = 0.10   # «se deberá verificar que el cliente aporte 10% de enganche mínimo»
+COLORES = {20: "gris", 25: "amarillo", 30: "azul", 40: "verde"}   # color en la tabla de bonos = enganche sistema
 
 def curva_a_dict(curva):
     return {p: t for p, t in zip([12, 24, 36, 48, 60], CURVAS[curva])}
@@ -227,11 +231,14 @@ def evaluar(op, n, d):
         eng_tot = eng_cli + bono_eng
         cap = base - eng_tot
         pct = eng_tot / base
+        pct_cli = eng_cli / base
         motivo = ""
         if eng_cli < 0:
             motivo = "El pago inicial no alcanza para seguro y comisión"
         elif pct < op["min"] - 1e-9:
-            motivo = f"Enganche {pct:.1%} menor al mínimo {op['min']:.0%}"
+            motivo = f"Enganche {pct:.2%} menor al mínimo {op['min']:.0%}"
+        elif pct_cli < ENGANCHE_MIN_CLIENTE - 1e-9:
+            motivo = f"El cliente aporta {pct_cli:.2%}: mínimo {ENGANCHE_MIN_CLIENTE:.0%}"
         elif op["max"] is not None and pct >= op["max"] - 1e-9:
             motivo = f"Enganche {pct:.1%}: aplica desde {op['max']:.0%} otra tasa"
         elif pct > ENGANCHE_MAX + 1e-9:
@@ -247,6 +254,7 @@ def evaluar(op, n, d):
             m2 = pm + round(pago_fijo(sa, ti, 12), 2) + round(vida1 + VIDA * sa * anios * VIDA_AJUSTE_SEGURO, 2)
         total = m1 * min(n, 12) + (m2 * (n - 12) if m2 else 0)
         r = dict(valida=not motivo, motivo=motivo, forma=forma, base=base, pct=pct, eng_cliente=eng_cli,
+                 pct_cliente=pct_cli,
                  bono_eng=bono_eng, eng_total=eng_tot, financiado=cap, monto_total=cap + sa * anios,
                  cxa=c * (cap + sa * anios), tasa=op["tasas"][n], tasa_iva=ti, pago_capital=pm, vida=vida1,
                  mens=m1, mens2=m2, total=total, plazo=n, seguro1=d["seguro1"], pago=d["pago"])
@@ -307,6 +315,64 @@ def tramos_seguro(ops, n, d, max_filas=8):
     return salida
 
 
+def texto_tasas(op):
+    """Tasas por plazo, juntando plazos con la misma tasa: «12-24 m 0% · 36 m 4.10% …»."""
+    grupos = []
+    for n, t in op["tasas"].items():
+        if grupos and grupos[-1][1] == t:
+            grupos[-1][0].append(n)
+        else:
+            grupos.append(([n], t))
+    return " · ".join((f"{g[0]} m" if len(g) == 1 else f"{g[0]}-{g[-1]} m") + f" {t:.2f}%" for g, t in grupos)
+
+
+def requisito(op, d, n=None):
+    """Enganche mínimo de la oferta: del sistema (incluye el bono si va al enganche) y real del cliente, y el pago
+    inicial mínimo (enganche + seguro + comisión) a `n` meses con el seguro capturado."""
+    precio, gap, bono = d["precio"], d["gap"], d["bono"]
+    base = precio + gap
+    if op["modo"] == "flexible":
+        bono_eng = bono
+        cli_pct = max(op["min"] - bono / base, ENGANCHE_MIN_CLIENTE)
+        forma = "al enganche o al precio"
+    else:
+        bono_eng = 0.0
+        cli_pct = max(op["min"], ENGANCHE_MIN_CLIENTE if op["modo"] == "sin_bono" else 0)
+        forma = "a la tasa (ya incluido)" if op["modo"] == "tasa" else "sin bono"
+    cli_monto = cli_pct * base
+    n = n if n in op["tasas"] else max(op["tasas"])
+    anios = n // 12 - 1
+    c = op["cxa"] * (1 + IVA)
+    cap = base - cli_monto - bono_eng
+    pago_min = cli_monto + d["seguro1"] + c * (cap + d["seguro_anual"] * anios)
+    return dict(oferta=op["nombre"], baremo=op["baremo"], cxa=op["cxa"], tasas=texto_tasas(op),
+                min_sistema=op["min"], min_max=op["max"], min_cliente=cli_pct, min_cliente_monto=cli_monto,
+                bono=forma, pago_min=math.ceil(round(pago_min, 2)), plazo_pago_min=n)
+
+
+def describir(vehiculo, precio, bono):
+    """Descripción de la oferta del boletín para el auto."""
+    v = CATALOGO[vehiculo]
+    if v["color"]:
+        pct_b = bono / precio
+        real = max(v["color"] / 100 - pct_b, ENGANCHE_MIN_CLIENTE)
+        txt = (f"Marcado en {COLORES[v['color']]} en la tabla de bonos (enganche sistema {v['color']}%). Bono MG de "
+               f"{money0(bono)} ({pct_b:.1%} del precio de lista {money0(precio)}), pagado 100% por MG Motors "
+               f"México. El bono se usa de una sola forma: a la tasa (planes de Tasa Baja: el cliente paga precio de "
+               f"lista y aporta todo el enganche) o al enganche / al precio (planes Estándar y Especial, bono "
+               f"flexible). Con el bono al enganche el cliente aporta desde {real:.1%} ({money0(real * precio)}) "
+               f"y el bono completa el {v['color']}% del sistema en el plan 17.74%; los planes 13.74% y 12.09% piden "
+               f"{v['color'] + 10}% y {v['color'] + 20}%.")
+    elif v["lanz"]:
+        txt = ("Modelo de lanzamiento: tasa 8.99% con 2% de comisión desde 30% de enganche (12 a 60 meses). No tiene "
+               "bono; también aplican los planes de toda la gama (13.74% desde 20%, 12.09% desde 30%).")
+    else:
+        txt = ("Sin bono en la tabla de bonos: aplican los planes de toda la gama (13.74% desde 20%, 17.74% de 10% a "
+               "menos de 20%, 12.09% desde 30%).")
+    return txt + (" Enganche mínimo real del cliente 10%; máximo 75%. Enganche menor a 20%: +4% a la tasa. "
+                  f"Oferta vigente {VIGENCIA}.")
+
+
 def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_manual=0.0, incluir_gap=False,
              iva=True):
     """pago = todo lo que trae el cliente (enganche + seguro del primer año + comisión por apertura).
@@ -328,7 +394,9 @@ def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_man
     return dict(vehiculo=vehiculo, precio=precio, bono=v["bono"], gap=d["gap"], pago=pago, seguro=d["seguro1"],
                 seguro_anual=d["seguro_anual"], seguro_anual_estimado=not seguro_anual and bool(seguro1),
                 plazo=plazo, iva=iva, ops=ops, evals=evals, ranking=ranking, matriz=matriz, mejores=mejores,
-                rangos=rangos, tramos=tramos_seguro(ops, plazo, d))
+                rangos=rangos, tramos=tramos_seguro(ops, plazo, d),
+                color=COLORES.get(v["color"]), descripcion=describir(vehiculo, precio, v["bono"]),
+                requisitos=[requisito(o, d, plazo) for o in ops])
 
 
 money = lambda x: "—" if x is None else f"${x:,.2f}"
@@ -351,9 +419,9 @@ def texto_mens(t):
 
 def desglose(ev):
     """Texto del pago inicial: enganche + seguro + comisión."""
-    partes = [f"enganche {money0(ev['eng_cliente'])}", f"seguro {money0(ev['seguro1'])}"]
+    partes = [f"eng. {money0(ev['eng_cliente'])}", f"seguro {money0(ev['seguro1'])}"]
     if ev["cxa"]:
-        partes.append(f"comisión {money0(ev['cxa'])}")
+        partes.append(f"com. {money0(ev['cxa'])}")
     return " + ".join(partes)
 
 
@@ -389,7 +457,7 @@ def pdf_bytes(res, cliente=""):
     s_cell_c, s_gris = st("cc", 8, NEGRO, align=TA_CENTER, leading=10), st("g", 7.5, TXT2, leading=9.5)
     s_head = st("hd", 7.5, colors.white, True, TA_CENTER, 9.5)
     s_lbl, s_det = st("lbl", 8, TXT2, True, TA_CENTER), st("det", 7.5, TXT2, align=TA_CENTER, leading=9.5)
-    s_val = st("val", 20, NEGRO, True, TA_CENTER, 24)
+    s_val = st("val", 18, NEGRO, True, TA_CENTER, 22)
     P = lambda t, s=s_cell: Paragraph(str(t), s)
 
     def encabezado(c, doc):
@@ -426,13 +494,17 @@ def pdf_bytes(res, cliente=""):
         _, op, ev = ranking[0]
         story.append(P(f"LO QUE PAGA EL CLIENTE · MEJOR OPCIÓN: {op['nombre'].upper()}", st("r0", 9, ROJO, True)))
         story.append(Spacer(1, 4))
+        eng_det = (f"{ev['pct_cliente']:.1%} del precio" + (" + GAP" if res["gap"] else "")
+                   + (f" · + bono {money0(ev['bono_eng'])} = {money0(ev['eng_total'])} ({ev['pct']:.1%})"
+                      if ev["bono_eng"] else ""))
         datos = [("PAGO INICIAL", money(pago), desglose(ev)),
+                 ("ENGANCHE DEL CLIENTE", money(ev["eng_cliente"]), eng_det),
                  ("TASA", f"{ev['tasa']:.2f}%", f"{ev['tasa_iva']:.2f}% con IVA · comisión {op['cxa']:.0%}"),
                  ("MENSUALIDAD", money(ev["mens"]),
                   "meses 1-12" + (f" · meses 13+: {money(ev['mens2'])}" if ev["mens2"] else "")),
-                 ("PLAZO", f"{plazo} meses", f"enganche {money0(ev['eng_total'])} ({ev['pct']:.1%})")]
+                 ("PLAZO", f"{plazo} meses", f"financiado {money0(ev['financiado'])}")]
         t = Table([[P(a, s_lbl) for a, _, _ in datos], [P(b, s_val) for _, b, _ in datos],
-                   [P(c, s_det) for _, _, c in datos]], colWidths=[ancho / 4] * 4)
+                   [P(c, s_det) for _, _, c in datos]], colWidths=[ancho / 5] * 5)
         t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), VERDE), ("LINEABOVE", (0, 0), (-1, 0), 3, VERDE_T),
                                ("LINEAFTER", (0, 0), (-2, -1), 2, colors.white),
                                ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 2), (-1, 2), 8)]))
@@ -453,23 +525,25 @@ def pdf_bytes(res, cliente=""):
     story.append(P("Con el mismo pago inicial en todas: el enganche se ajusta a lo que queda después del seguro y la "
                    "comisión (más el bono si va al enganche). Ordenadas por el total de mensualidades.", s_small))
     story.append(Spacer(1, 5))
-    cab = ["#", "Oferta", "Baremo", "Bono", "Enganche", "Comisión", "Tasa / c IVA", "Financiado", "Mens. 1-12",
-           "Mens. 13+", "Total mensualidades", "Seguro permitido"]
+    cab = ["#", "Oferta", "Bono", "Eng. cliente", "Eng. total", "Comisión", "Tasa / c IVA", "Financ.",
+           "Mens. 1-12", "Mens. 13+", "Total mens.", "Seguro permitido"]
+    nom = lambda o, est: P(f"{o['nombre']}<br/><font size=6.5 color='#5A5A5A'>Baremo {o['baremo']}</font>", est)
     filas = [[P(h, s_head) for h in cab]]
     for i, (tot, o, e) in enumerate(ranking, 1):
         b = s_cell_b if i == 1 else s_cell_c
-        filas.append([P(i, s_cell_c), P(o["nombre"], s_cell_b if i == 1 else s_cell), P(o["baremo"], s_cell_c),
-                      P(e["forma"], s_cell_c), P(f"{money0(e['eng_total'])}<br/>{e['pct']:.1%}", s_cell_c),
+        filas.append([P(i, s_cell_c), nom(o, s_cell_b if i == 1 else s_cell), P(e["forma"], s_cell_c),
+                      P(f"{money0(e['eng_cliente'])}<br/>{e['pct_cliente']:.1%}", b),
+                      P(f"{money0(e['eng_total'])}<br/>{e['pct']:.1%}", s_cell_c),
                       P(money(e["cxa"]), s_cell_c), P(f"{e['tasa']:.2f}% / {e['tasa_iva']:.2f}%", s_cell_c),
                       P(money0(e["financiado"]), s_cell_c), P(money(e["mens"]), b), P(money(e["mens2"]), s_cell_c),
                       P(money(tot), s_cell_c), P(texto_rango(res["rangos"][o["nombre"]]), s_cell_c)])
     malas = [o for o in res["ops"] if not (res["evals"][o["nombre"]] and res["evals"][o["nombre"]]["valida"])]
     for o in malas:
         e = res["evals"][o["nombre"]]
-        filas.append([P("—", s_cell_c), P(o["nombre"], s_gris), P(o["baremo"], s_cell_c), P("", s_cell),
+        filas.append([P("—", s_cell_c), nom(o, s_gris), P("", s_cell),
                       P(e["motivo"] if e else "No maneja este plazo", st("m", 7.5, TXT2, align=TA_CENTER))]
-                     + [P("")] * 6 + [P(texto_rango(res["rangos"][o["nombre"]]), s_cell_c)])
-    cw = [0.025, 0.19, 0.065, 0.07, 0.07, 0.07, 0.085, 0.08, 0.07, 0.07, 0.095, 0.11]
+                     + [P("")] * 7 + [P(texto_rango(res["rangos"][o["nombre"]]), s_cell_c)])
+    cw = [0.025, 0.19, 0.07, 0.075, 0.075, 0.07, 0.085, 0.07, 0.07, 0.07, 0.09, 0.11]
     tr = Table(filas, colWidths=[ancho * x for x in cw], repeatRows=1)
     est = [("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
            ("LINEBELOW", (0, 1), (-1, -1), 0.4, GRIS2), ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -478,7 +552,7 @@ def pdf_bytes(res, cliente=""):
         est.append(("BACKGROUND", (0, 1), (-1, 1), VERDE))
     for k in range(len(malas)):
         r = len(ranking) + 1 + k
-        est += [("BACKGROUND", (0, r), (-1, r), GRIS), ("SPAN", (4, r), (10, r))]
+        est += [("BACKGROUND", (0, r), (-1, r), GRIS), ("SPAN", (3, r), (10, r))]
     tr.setStyle(TableStyle(est))
     story += [tr, Spacer(1, 8),
               P("Mensualidad = pago fijo del capital + seguro de vida (0.82% anual sobre el capital). Desde el mes 13 "
@@ -486,8 +560,33 @@ def pdf_bytes(res, cliente=""):
                 "= % + IVA sobre el monto total a financiar. Enganche menor a 20%: +4% a la tasa; máximo 75%. "
                 "No incluye Anualidades, University ni Seminuevos.", s_small)]
 
-    # --- Seguro
+    # --- Oferta del boletín para el auto
     story.append(PageBreak())
+    story.append(P("Oferta del boletín para este auto", s_h2))
+    story.append(P(res["descripcion"], s_p))
+    story.append(Spacer(1, 6))
+    cab_o = ["Oferta", "Tasas por plazo", "Comisión", "Bono", "Eng. mínimo sistema",
+             "Eng. mínimo real del cliente", f"Pago inicial mínimo ({plazo} m, con seguro y comisión)"]
+    filas_o = [[P(h, s_head) for h in cab_o]]
+    for q in res["requisitos"]:
+        sis = f"{q['min_sistema']:.0%}" + (f" a &lt;{q['min_max']:.0%}" if q["min_max"] else "")
+        filas_o.append([P(f"{q['oferta']}<br/><font size=6.5 color='#5A5A5A'>Baremo {q['baremo']}</font>"),
+                        P(q["tasas"], st("tz", 7.5, NEGRO, leading=9.5)), P(f"{q['cxa']:.0%}", s_cell_c),
+                        P(q["bono"], s_cell_c), P(sis, s_cell_c),
+                        P(f"<b>{q['min_cliente']:.1%}</b><br/>{money0(q['min_cliente_monto'])}", s_cell_c),
+                        P(money0(q["pago_min"]) + ("" if q["plazo_pago_min"] == plazo else
+                                                   f" ({q['plazo_pago_min']} m)"), s_cell_c)])
+    to = Table(filas_o, colWidths=[ancho * x for x in (0.21, 0.25, 0.07, 0.1, 0.09, 0.12, 0.16)], repeatRows=1)
+    to.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                            ("LINEBELOW", (0, 1), (-1, -1), 0.4, GRIS2), ("TOPPADDING", (0, 0), (-1, -1), 4),
+                            ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+    story += [to, Spacer(1, 4),
+              P("Eng. mínimo real del cliente: lo que el cliente pone de su bolsa. Con bono al enganche = enganche "
+                "sistema − % del bono (mínimo 10%); en Tasa Baja el bono va a la tasa y el cliente pone todo el "
+                "enganche. El pago inicial mínimo suma el seguro del primer año y la comisión por apertura.", s_small),
+              Spacer(1, 14)]
+
+    # --- Seguro
     tramos = res["tramos"]
     story.append(P("¿Cuánto puede valer el seguro del primer año?", s_h2))
     story.append(P(f"El seguro se paga de contado con el pago inicial ({money0(pago)}): entre más cuesta, menos "

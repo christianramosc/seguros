@@ -66,7 +66,13 @@ enganche)**. Las mensualidades usan el mismo método del cotizador de Autoexpres
 interruptor «Incluir GAP» queda desactivado hasta cargar la tabla en `oferta_mg.py` (`TABLA_GAP`, lista de
 `(precio_hasta, monto_gap)`); en cuanto tenga montos se activa solo.
 
-Pestañas: **Comparativo** (todas las ofertas con el mismo pago inicial y el seguro máximo de cada una), **Seguro**
+**Enganche mínimo real del cliente** (lo que pone de su bolsa): con bono al enganche = enganche sistema según el
+color de la tabla de bonos − % del bono, nunca menos de 10% (coincide con la columna del boletín); en Tasa Baja el
+bono va a la tasa y el cliente pone todo el enganche.
+
+Pestañas: **Comparativo** (todas las ofertas con el mismo pago inicial, enganche del cliente y total, y el seguro
+máximo de cada una), **Oferta del auto** (descripción de la oferta, color, bono, enganche mínimo del sistema y real
+del cliente, y pago inicial mínimo por plan), **Seguro**
 (qué oferta conviene según el costo del seguro), **Por plazo** (mensualidades de 12 a 72 meses). Botón **PDF del
 análisis**.
 
