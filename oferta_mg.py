@@ -689,3 +689,145 @@ def pdf_bytes(res, cliente=""):
     story.append(KeepTogether(bloque))
     doc.build(story)
     return archivo.getvalue()
+
+
+# ------------------------------------------------------------------------------------
+# Tabla de mínimos de toda la oferta (sin seguro: «+ seguro de contado»)
+# ------------------------------------------------------------------------------------
+def tabla_minimos(iva=True):
+    """Por auto y plan: enganche mínimo (sistema y real del cliente), comisión, desembolso y pago inicial mínimos
+    sin el seguro de contado, y la mensualidad (meses 1-12) con ese enganche mínimo a 60 meses y al plazo máximo.
+    Los modelos sin precio en el boletín salen solo con porcentajes."""
+    salida = []
+    for veh, v in CATALOGO.items():
+        if veh.startswith("OTRO"):
+            continue
+        precio = v["msrp"]
+        d = dict(precio=precio or 0.0, gap=0.0, gap_contado=0.0, bono=v["bono"], pago=0.0, seguro1=0.0,
+                 seguro_anual=0.0, seguro_anual_capturado=0.0, iva=iva)
+        planes = []
+        for op in ofertas_para(v):
+            nmax = max(op["tasas"])
+            fila = dict(oferta=op["nombre"], baremo=op["baremo"], cxa=op["cxa"], min_sistema=op["min"],
+                        min_max=op["max"], plazo_max=nmax, tasa60=op["tasas"].get(60), tasa_max=op["tasas"][nmax],
+                        bono=("a la tasa" if op["modo"] == "tasa" else "al enganche" if op["modo"] == "flexible"
+                              else "sin bono"))
+            if precio:
+                q = requisito(op, d, nmax)
+                dd = dict(d, pago=q["desembolso_min"])
+                e60 = evaluar(op, 60, dd) if 60 in op["tasas"] else None
+                emax = evaluar(op, nmax, dd)
+                fila.update(min_cliente=q["min_cliente"], min_cliente_monto=q["min_cliente_monto"],
+                            comision=emax["cxa"], desembolso_min=q["desembolso_min"],
+                            pago_inicial_min=q["pago_inicial_min"], financiado=emax["financiado"],
+                            mens60=e60["mens"] if e60 else None, mens_max=emax["mens"])
+            else:
+                fila.update(min_cliente=max(op["min"], ENGANCHE_MIN_CLIENTE if op["modo"] != "tasa" else 0))
+            planes.append(fila)
+        salida.append(dict(vehiculo=veh, precio=precio, bono=v["bono"], color=COLORES.get(v["color"]),
+                           sistema=v["color"], lanz=v["lanz"], planes=planes,
+                           min_real=(max(v["color"] / 100 - v["bono"] / precio, ENGANCHE_MIN_CLIENTE)
+                                     if v["color"] else None)))
+    return salida
+
+
+def pdf_minimos(iva=True):
+    """PDF con la tabla de mínimos de toda la oferta (bytes)."""
+    from reportlab.lib.pagesizes import letter, landscape
+    from reportlab.lib import colors
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.platypus import BaseDocTemplate, PageTemplate, Frame, Paragraph, Spacer, Table, TableStyle
+
+    ROJO = colors.HexColor("#C8102E"); NEGRO = colors.HexColor("#1A1A1A"); GRIS2 = colors.HexColor("#D9D9D9")
+    TXT2 = colors.HexColor("#5A5A5A")
+    FONDO = {"gris": "#EDEDED", "amarillo": "#FFF4CC", "azul": "#DCE6F2", "verde": "#E2F0D9", None: "#F3F3F3"}
+    W, H = landscape(letter)
+    M = 30
+    ancho = W - 2 * M
+
+    def st(name, size=8, color=NEGRO, bold=False, align=0, leading=None):
+        return ParagraphStyle(name, fontName="Helvetica-Bold" if bold else "Helvetica", fontSize=size,
+                              textColor=color, alignment=align, leading=leading or size * 1.25)
+    s_h1, s_p, s_small = st("h1", 16, NEGRO, True), st("p", 8.5, NEGRO, leading=11), st("sm", 7, TXT2, leading=9)
+    s_c, s_cc, s_cb = st("c", 7.5, leading=9.3), st("cc", 7.5, align=TA_CENTER, leading=9.3), \
+        st("cb", 7.5, NEGRO, True, TA_CENTER, 9.3)
+    s_head = st("hd", 7, colors.white, True, TA_CENTER, 8.8)
+    s_veh = st("veh", 8.5, NEGRO, True, leading=10.5)
+    P = lambda t, s=s_c: Paragraph(str(t), s)
+    MAS = "<br/><font size=6.3 color='#C8102E'>+ seguro</font>"
+
+    def encabezado(c, doc):
+        c.saveState()
+        c.setFillColor(NEGRO); c.rect(0, H - 32, W, 32, fill=1, stroke=0)
+        c.setFillColor(ROJO); c.rect(0, H - 35, W, 3, fill=1, stroke=0)
+        c.setFillColor(colors.white); c.setFont("Helvetica-Bold", 11)
+        c.drawString(M, H - 21, "MG FINANCIAL SERVICES  |  Mínimos de la oferta comercial")
+        c.setFont("Helvetica", 8.5)
+        c.drawRightString(W - M, H - 21, f"Oferta comercial {OFERTA_MES.lower()} · {BOLETIN} · vigente {VIGENCIA}")
+        c.setFillColor(TXT2); c.setFont("Helvetica", 7)
+        c.drawString(M, 16, "Montos sin seguro de contado: súmalo al desembolso y al pago inicial. Mensualidad meses "
+                            "1-12 con seguro de vida; desde el mes 13 se suma el seguro financiado.")
+        c.drawRightString(W - M, 16, f"Página {doc.page}")
+        c.restoreState()
+
+    archivo = io.BytesIO()
+    doc = BaseDocTemplate(archivo, pagesize=landscape(letter), leftMargin=M, rightMargin=M, topMargin=46,
+                          bottomMargin=30, title=f"Mínimos oferta {BOLETIN}", author="MG Colima")
+    doc.addPageTemplates([PageTemplate(id="p", onPage=encabezado, frames=[Frame(M, 30, ancho, H - 76, id="f")])])
+    story = [P(f"Tabla de mínimos por auto · {OFERTA_MES}", s_h1), Spacer(1, 4),
+             P("Para cada auto y plan: enganche mínimo del sistema (incluye el bono cuando va al enganche) y "
+               "<b>enganche mínimo real del cliente</b> (lo que pone de su bolsa), comisión por apertura, "
+               "<b>desembolso mínimo</b> (enganche propio + comisión) y <b>pago inicial mínimo</b> como en la "
+               "cotización (enganche + comisión). <b>A ambos hay que sumarles el seguro de contado</b> (y el GAP de "
+               "contado si aplica). La mensualidad es la de los meses 1-12 con el enganche mínimo; la comisión aquí "
+               "no incluye la del seguro financiado (2.32% de los seguros de los años 2 en adelante en planes con "
+               "comisión). Color = color en la tabla de bonos (enganche sistema): gris 20%, amarillo 25%, azul 30%, "
+               "verde 40%.", s_p), Spacer(1, 8)]
+    cab = ["Plan", "Bono", "Eng. mín. sistema", "Eng. mín. real cliente", "Comisión", "Desembolso mínimo",
+           "Pago inicial mínimo", "Financiado", "Tasa 60 m", "Mens. 60 m", "Plazo máx.", "Mens. plazo máx."]
+    cw = [0.2, 0.065, 0.065, 0.085, 0.06, 0.09, 0.09, 0.07, 0.055, 0.07, 0.07, 0.08]
+    filas = [[P(h, s_head) for h in cab]]
+    est = [("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+           ("TOPPADDING", (0, 0), (-1, -1), 1.8), ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8)]
+    for a in tabla_minimos(iva):
+        r = len(filas)
+        if a["precio"]:
+            det = f"precio {money0(a['precio'])}"
+            if a["bono"]:
+                det += (f" · bono {money0(a['bono'])} ({a['bono'] / a['precio']:.1%}) · color {a['color']} "
+                        f"(sistema {a['sistema']}%) · el cliente aporta desde {a['min_real']:.1%}")
+            else:
+                det += " · sin bono"
+        else:
+            det = "lanzamiento · sin precio en el boletín (montos según el precio del auto)"
+        filas.append([P(f"{a['vehiculo']} <font size=7 color='#5A5A5A'>· {det}</font>", s_veh)] + [""] * 11)
+        est += [("SPAN", (0, r), (-1, r)), ("BACKGROUND", (0, r), (-1, r), colors.HexColor(FONDO[a["color"]])),
+                ("LINEABOVE", (0, r), (-1, r), 0.8, NEGRO)]
+        for q in a["planes"]:
+            sis = f"{q['min_sistema']:.0%}" + (f" a &lt;{q['min_max']:.0%}" if q["min_max"] else "")
+            plan = (f"{q['oferta']} <font size=6.3 color='#5A5A5A'>· {q['baremo']} · com. {q['cxa']:.0%}</font>")
+            if a["precio"]:
+                filas.append([
+                    P(plan), P(q["bono"], s_cc), P(sis, s_cc),
+                    P(f"<b>{q['min_cliente']:.1%}</b> · {money0(q['min_cliente_monto'])}", s_cc),
+                    P(money0(q["comision"]), s_cc), P(money0(q["desembolso_min"]) + MAS, s_cb),
+                    P(money0(q["pago_inicial_min"]) + MAS, s_cb), P(money0(q["financiado"]), s_cc),
+                    P(f"{q['tasa60']:.2f}%" if q["tasa60"] is not None else "—", s_cc),
+                    P(money(q["mens60"]) if q["mens60"] else "—", s_cc),
+                    P(f"{q['plazo_max']} m · {q['tasa_max']:.2f}%", s_cc), P(money(q["mens_max"]), s_cb)])
+            else:
+                filas.append([P(plan), P(q["bono"], s_cc), P(sis, s_cc), P(f"<b>{q['min_cliente']:.1%}</b>", s_cc),
+                              P("—", s_cc), P("—", s_cc), P("—", s_cc), P("—", s_cc),
+                              P(f"{q['tasa60']:.2f}%" if q["tasa60"] is not None else "—", s_cc), P("—", s_cc),
+                              P(f"{q['plazo_max']} m · {q['tasa_max']:.2f}%", s_cc), P("—", s_cc)])
+            est.append(("LINEBELOW", (0, len(filas) - 1), (-1, len(filas) - 1), 0.3, GRIS2))
+    t = Table(filas, colWidths=[ancho * x for x in cw], repeatRows=1)
+    t.setStyle(TableStyle(est))
+    story += [t, Spacer(1, 6),
+              P("Enganche mínimo real del cliente: con bono al enganche = enganche sistema − % del bono, nunca menos "
+                "de 10%; en Tasa Baja el bono va a la tasa y el cliente pone todo el enganche. Enganche menor a 20%: "
+                "+4% a la tasa; máximo 75%. Cálculo con el método del cotizador de Autoexpress: verificar en el "
+                "cotizador oficial.", s_small)]
+    doc.build(story)
+    return archivo.getvalue()
