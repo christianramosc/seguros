@@ -80,7 +80,8 @@ análisis**.
 
 **PDF de mínimos de toda la oferta** (pestaña «Oferta del auto»): todos los autos y planes del boletín con el
 enganche mínimo del sistema y real del cliente, comisión, desembolso y pago inicial mínimos (+ seguro de contado) y la
-mensualidad con el enganche mínimo a 60 meses y al plazo máximo.
+mensualidad con el enganche mínimo en cada plazo, de 12 meses al plazo máximo de cada plan (un bloque por auto, la
+menor de cada plazo en verde). La misma tabla de mensualidades sale en la app para el auto elegido.
 
 **Cada mes** actualiza en `oferta_mg.py`: `BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche
 sistema y tasas bajas), `CURVAS` y, cuando la tengas, `TABLA_GAP`.
