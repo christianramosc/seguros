@@ -3,7 +3,7 @@
 App MG Colima · Autoexpress Inbursa.
 
 Pestañas (arriba):
-  · Pólizas       → seguimiento de pólizas de seguro (pag_polizas.py)
+  · Pólizas       → seguimiento de pólizas de seguro (pag_polizas.py) · desactivada por ahora
   · Mejor oferta  → compara las ofertas del boletín de MG Financial Services para un auto (pag_oferta.py)
 """
 import os
@@ -44,7 +44,10 @@ if not acceso_permitido():
 
 ui.estilos()
 
-st.navigation([
-    st.Page("pag_polizas.py", title="Pólizas", icon=":material/shield:", default=True),
-    st.Page("pag_oferta.py", title="Mejor oferta MG", icon=":material/directions_car:", url_path="oferta"),
-], position="top").run()
+# «Pólizas» desactivada por ahora: para volver a mostrarla, descomenta su línea (y quita default= de la otra).
+PAGINAS = [
+    # st.Page("pag_polizas.py", title="Pólizas", icon=":material/shield:", default=True),
+    st.Page("pag_oferta.py", title="Mejor oferta MG", icon=":material/directions_car:", url_path="oferta",
+            default=True),
+]
+st.navigation(PAGINAS, position="top" if len(PAGINAS) > 1 else "hidden").run()

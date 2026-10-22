@@ -1,5 +1,8 @@
 # Pólizas MG Colima
 
+> La página **Pólizas** está desactivada por ahora: la app abre directo en **Mejor oferta MG**. Para volver a
+> mostrarla, descomenta su línea en `streamlit_app.py`.
+
 App de Streamlit para dar seguimiento a las pólizas de seguro de los créditos de MG Colima (Autoexpress Inbursa) y
 saber **a qué clientes contactar** para venderles póliza externa, recordarles el pago de contado o aprovechar el fin
 de su crédito.
@@ -78,16 +81,16 @@ color de la tabla de bonos − % del bono, exacto (la columna del boletín lo re
 cotizador acepta el mínimo exacto); en Tasa Baja el
 bono va a la tasa y el cliente pone todo el enganche.
 
-Pestañas: **Comparativo** (todas las ofertas con el mismo pago inicial, enganche del cliente y total, y el seguro
-máximo de cada una), **Oferta del auto** (descripción de la oferta, color, bono, enganche mínimo del sistema y real
-del cliente, y pago inicial mínimo por plan), **Seguro**
-(qué oferta conviene según el costo del seguro), **Por plazo** (mensualidades de 12 a 72 meses). Botón **PDF del
-análisis**.
+Debajo de la mejor opción, **una sola tabla con todos los planes** al plazo elegido: pago inicial, desembolso,
+enganche, mensualidad, tasa, total, **hasta cuánto puede valer la póliza** y, si no aplica, por qué. Pestañas: **Por
+plazo** (mensualidades de 12 a 72 meses con lo capturado) y **Mínimos y oferta del auto** (enganche mínimo del sistema
+y del cliente, desembolso y pago inicial mínimos y mensualidad con el enganche mínimo de 12 meses al plazo máximo;
+descripción de la oferta y botón **PDF de mínimos de toda la oferta**). GAP, cliente e IVA van en «Más opciones».
+Botón **PDF del análisis**.
 
-**PDF de mínimos de toda la oferta** (pestaña «Oferta del auto»): todos los autos y planes del boletín con el
-enganche mínimo del sistema y real del cliente, comisión, desembolso y pago inicial mínimos (+ seguro de contado) y la
-mensualidad con el enganche mínimo en cada plazo, de 12 meses al plazo máximo de cada plan (un bloque por auto, la
-menor de cada plazo en verde). La misma tabla de mensualidades sale en la app para el auto elegido.
+**PDF de mínimos de toda la oferta**: todos los autos y planes del boletín con el enganche mínimo del sistema y real
+del cliente, comisión, desembolso y pago inicial mínimos (+ seguro de contado) y la mensualidad con el enganche mínimo
+en cada plazo, de 12 meses al plazo máximo de cada plan (un bloque por auto, la menor de cada plazo en verde).
 
 **Cada mes** actualiza en `oferta_mg.py`: `BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche
 sistema y tasas bajas), `CURVAS` y, cuando la tengas, `TABLA_GAP`.
