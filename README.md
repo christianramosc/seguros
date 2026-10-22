@@ -150,6 +150,9 @@ esa app se lee como cualquier otra pestaña (`libro.worksheet("Polizas")`). Arri
 Al cargar el Excel (o los PDF) y al dar **Guardar y actualizar estatus**, la app guarda el Excel y lo abre sola la próxima vez.
 
 - **Sin configurar nada:** se guarda en el servidor de Streamlit. Se pierde si la app se reinicia o se duerme por inactividad (entonces vuelves a subirlo una vez).
+- **Permanente (Google Sheet):** si ya configuraste la copia en Google Sheets (abajo), el Excel completo también se
+  guarda en una pestaña oculta `_Polizas_excel` de ese Sheet y la app lo abre sola aunque se reinicie. No hay que hacer
+  nada más.
 - **Permanente (Google Drive):**
   1. En Google Cloud Console crea un proyecto, activa **Google Drive API** y crea una **cuenta de servicio** con una clave JSON.
   2. Sube a tu Drive el `Polizas_extraidas.xlsx` y compártelo como **Editor** con el `client_email` de la cuenta de servicio.
