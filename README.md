@@ -74,7 +74,8 @@ selector «GAP» (No / Contado / Financiado) queda desactivado hasta cargar la t
 `(precio_hasta, monto_gap)`); en cuanto tenga montos se activa solo.
 
 **Enganche mínimo real del cliente** (lo que pone de su bolsa): con bono al enganche = enganche sistema según el
-color de la tabla de bonos − % del bono, nunca menos de 10% (coincide con la columna del boletín); en Tasa Baja el
+color de la tabla de bonos − % del bono, exacto (la columna del boletín lo redondea: 9.96% aparece como 10%; el
+cotizador acepta el mínimo exacto); en Tasa Baja el
 bono va a la tasa y el cliente pone todo el enganche.
 
 Pestañas: **Comparativo** (todas las ofertas con el mismo pago inicial, enganche del cliente y total, y el seguro
