@@ -87,6 +87,11 @@ def correr(*a):
     return om.analizar(*a)
 
 
+@st.cache_data(show_spinner="Armando la tabla de mínimos…")
+def pdf_minimos(boletin, iva):
+    return om.pdf_minimos(iva)
+
+
 @st.cache_data(show_spinner=False)
 def pdf(a, cliente):
     return om.pdf_bytes(correr(*a), cliente)
@@ -155,6 +160,12 @@ with t_oferta:
                "bono (mínimo 10%); en Tasa Baja el bono va a la tasa y el cliente pone todo el enganche. Desembolso "
                "mínimo = enganche propio + seguro año 1 + GAP contado + comisión; pago inicial mínimo = desembolso + "
                "bono al enganche (como lo muestra la cotización).")
+    st.download_button("PDF de mínimos de toda la oferta", pdf_minimos(om.BOLETIN, iva),
+                       file_name=f"Minimos_oferta_MG_{om.BOLETIN}.pdf", mime="application/pdf",
+                       icon=":material/table_view:",
+                       help="Todos los autos y planes del boletín: enganche mínimo del sistema y real del cliente, "
+                            "desembolso y pago inicial mínimos (+ seguro de contado) y mensualidades con el "
+                            "enganche mínimo.")
 
 with t_rank:
     st.caption("Con el mismo desembolso del cliente en todas: el enganche se ajusta a lo que queda después del seguro "

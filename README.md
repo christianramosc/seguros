@@ -78,6 +78,10 @@ del cliente, y pago inicial mínimo por plan), **Seguro**
 (qué oferta conviene según el costo del seguro), **Por plazo** (mensualidades de 12 a 72 meses). Botón **PDF del
 análisis**.
 
+**PDF de mínimos de toda la oferta** (pestaña «Oferta del auto»): todos los autos y planes del boletín con el
+enganche mínimo del sistema y real del cliente, comisión, desembolso y pago inicial mínimos (+ seguro de contado) y la
+mensualidad con el enganche mínimo a 60 meses y al plazo máximo.
+
 **Cada mes** actualiza en `oferta_mg.py`: `BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche
 sistema y tasas bajas), `CURVAS` y, cuando la tengas, `TABLA_GAP`.
 
