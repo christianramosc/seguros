@@ -92,11 +92,12 @@ Botón **PDF del análisis**.
 del cliente, comisión, desembolso y pago inicial mínimos (+ seguro de contado) y la mensualidad con el enganche mínimo
 en cada plazo, de 12 meses al plazo máximo de cada plan (un bloque por auto, la menor de cada plazo en verde).
 
-**Seguro:** el del año 1 puede ir de **contado** (en el pago inicial) o **financiado** (se suma al monto a financiar,
-paga comisión y se amortiza en los meses 1-12 a la misma tasa); el de los años 2+ puede ir **financiado**
-(fraccionado desde el mes 13) o de **contado** (el cliente lo paga cada aniversario). Con seguro de contado los montos
-cuadran al centavo con el cotizador; con el del año 1 financiado, el seguro de vida sobre ese seguro es una
-aproximación hasta validarlo con una cotización.
+**Seguro:** el del año 1 puede ir de **contado** (en el pago inicial) o **financiado** («Autoexpress Multianual
+Fraccionado»: el importe anual se financia también el año 1, se amortiza en los meses 1-12, paga comisión y la
+cotización muestra el importe primer año en $0); el de los años 2+ puede ir **financiado** (fraccionado desde el mes
+13) o de **contado** (el cliente lo paga cada aniversario). Validado con cotizaciones reales: monto a financiar,
+comisión y pago inicial al centavo; la mensualidad difiere hasta ±$0.10 por el seguro de vida sobre el seguro
+financiado (fórmula ajustada con 8 cotizaciones a 60 meses).
 
 **Cada mes** actualiza en `oferta_mg.py`: `BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche
 sistema y tasas bajas), `CURVAS` y, cuando la tengas, `TABLA_GAP`.

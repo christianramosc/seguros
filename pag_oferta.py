@@ -76,8 +76,10 @@ with st.container(border=True):
     s1, s2, _ = st.columns([2, 2, 3])
     seguro1_fin = (s1.segmented_control("Seguro año 1", ["Contado", "Financiado"], default="Contado",
                                         key="of_seg1_modo",
-                                        help="Contado: va en el pago inicial. Financiado: se suma al monto a "
-                                             "financiar, paga comisión y se amortiza en los meses 1-12.")
+                                        help="Contado: va en el pago inicial. Financiado (Autoexpress Multianual "
+                                             "Fraccionado): el importe anual se financia también el año 1 —se "
+                                             "amortiza en los meses 1-12 y paga comisión— y el «Seguro año 1» "
+                                             "no se usa (en la cotización sale en $0).")
                    or "Contado") == "Financiado"
     resto_fin = (s2.segmented_control("Seguro años 2+", ["Financiado", "Contado"], default="Financiado",
                                       key="of_seg2_modo",
@@ -146,9 +148,10 @@ else:
 if not seguro1:
     st.caption(":material/warning: Seguro en \\$0: todo va a enganche. La columna «Póliza año 1» dice hasta cuánto "
                "puede valer.")
-if seguro1 and seguro1_fin:
-    st.caption(":material/info: Seguro del año 1 financiado: no va en el pago inicial, paga comisión y sube la "
-               "mensualidad de los meses 1-12. El seguro de vida sobre ese seguro es aproximado (centavos).")
+if seguro1_fin:
+    st.caption(":material/info: Seguro multianual fraccionado: el importe anual se financia también el año 1 "
+               "(no va en el pago inicial, paga comisión) y la mensualidad queda igual todo el plazo. Captura el "
+               "importe anual en «Seguro anual (años 2+)».")
 if not resto_fin:
     st.caption(D(":material/info: Seguro de los años 2+ de contado: el cliente paga "
                  f"{om.money(res['seguro_anual'])} en cada aniversario; la mensualidad no sube desde el mes 13."))
