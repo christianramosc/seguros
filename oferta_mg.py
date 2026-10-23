@@ -22,8 +22,10 @@ Cálculo igual al cotizador de Autoexpress (validado contra cotizaciones reales,
   · Seguro año 1: contado (va en el pago inicial) o financiado (se suma al monto a financiar, paga comisión y se
     amortiza en los meses 1-12 a la misma tasa, igual que el de los años 2+). Seguro años 2+: financiado (cada año a
     12 meses desde el mes 13) o contado (el cliente lo paga cada aniversario; no sube la mensualidad).
-    Año 1 financiado = «Autoexpress Multianual Fraccionado»: el importe anual se financia también en el año 1
-    (validado con 2 cotizaciones, MG3 Style AT plan 415 y MG5 Elegance AT plan 448).
+    Año 1 financiado = «Autoexpress Multianual Fraccionado»: el importe anual se financia también en el año 1.
+  · Seguro de vida: sin seguro financiado = 0.82% anual sobre el capital; con seguro financiado = 4.08995% de
+    (capital + importe anual × años del plazo) repartido en los n meses. Validado con 12 cotizaciones (36, 48 y 60
+    meses): mensualidad al centavo en 11 y a $0.01 en la otra.
     El enganche incluye el bono cuando va al enganche.
   · Desembolso del cliente = lo que pone de su bolsa = pago inicial − bono al enganche. Es el dato que se captura:
     enganche = desembolso − seguro − GAP contado − comisión (+ bono si va al enganche).
@@ -204,14 +206,14 @@ def requiere_precio(vehiculo):
 # Cálculos (mismo método que el cotizador de Autoexpress)
 # ------------------------------------------------------------------------------------
 VIDA = 0.0082 / 12          # seguro de vida mensual sobre el capital
-# Seguro de vida sobre el seguro financiado: VIDA × importe anual × (años de plazo) × 0.99073. Ajustado con 8
-# cotizaciones a 60 meses (seguro de contado y multianual fraccionado); diferencias de ±$0.05. En otros plazos se
-# supone proporcional a los años del plazo (falta validarlo).
-VIDA_FACTOR_SEGURO = 0.99073
+# Seguro de vida cuando hay seguro de auto financiado: prima total = 4.08995% de (capital + importe anual × años del
+# plazo), repartida en los n meses. Exacta en 11 de 12 cotizaciones reales (36, 48 y 60 meses; contado y multianual)
+# y a $0.01 en la otra.
+VIDA_TOTAL = 0.0408995
 
 
-def vida_seguro(sa, n):
-    return VIDA * sa * (n / 12) * VIDA_FACTOR_SEGURO
+def vida_con_seguro(cap, sa, n):
+    return round(VIDA_TOTAL * (cap + sa * n / 12) / n, 2)
 
 
 def tasa_con_iva(tasa, iva=True):
@@ -273,12 +275,12 @@ def evaluar(op, n, d):
         vida1 = round(max(cap, 0) * VIDA, 2)
         m1 = pm + vida1
         if s1f:   # seguro año 1 financiado (multianual fraccionado): se amortiza en los meses 1-12
-            m1 = pm + round(pago_fijo(s1f, ti, 12), 2) + round(vida1 + vida_seguro(s1f, n), 2)
+            m1 = pm + round(pago_fijo(s1f, ti, 12), 2) + vida_con_seguro(max(cap, 0), s1f, n)
         m2 = None
         if anios > 0:
             m2 = pm + vida1
             if sa:
-                m2 = pm + round(pago_fijo(sa, ti, 12), 2) + round(vida1 + vida_seguro(sa, n), 2)
+                m2 = pm + round(pago_fijo(sa, ti, 12), 2) + vida_con_seguro(max(cap, 0), sa, n)
         total = m1 * min(n, 12) + (m2 * (n - 12) if m2 else 0)
         r = dict(valida=not motivo, motivo=motivo, forma=forma, base=base, pct=pct, eng_cliente=eng_cli,
                  pct_cliente=pct_cli,
