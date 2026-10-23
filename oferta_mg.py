@@ -31,7 +31,7 @@ Cálculo igual al cotizador de Autoexpress (validado contra cotizaciones reales,
   · Enganche % sobre precio + GAP (si se incluye). Capital = precio + GAP − enganche total.
   · Comisión por apertura = CXA% + IVA sobre el monto total a financiar (capital + seguro anual × años 2 en adelante).
   · Tasa con IVA = tasa × 1.16 redondeada a 2 decimales; pagos fijos mensuales.
-  · Seguro de vida = 0.82% anual sobre el capital, dentro de la mensualidad.
+  · Seguro de vida dentro de la mensualidad (ver vida_capital y vida_con_seguro).
   · Seguro de los años 2 en adelante: cada año se financia a 12 meses a la misma tasa (sube la mensualidad desde el
     mes 13). El seguro de vida de esos meses se aproxima (diferencia de centavos).
 
@@ -434,19 +434,22 @@ GAP_MODOS = ("No", "Contado", "Financiado")
 
 
 def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_manual=0.0, gap_modo="No",
-             iva=True, pago_inicial=0.0, seguro1_fin=False, resto_fin=True):
+             iva=True, pago_inicial=0.0, seguro1_fin=False, resto_fin=True, gap_monto=0.0):
     """pago = desembolso del cliente: lo que pone de su bolsa (pago inicial − bono al enganche).
     pago_inicial: si se captura (> 0) manda sobre `pago`: es el pago inicial de la cotización y el desembolso de cada
     plan sale de él (− bono al enganche si el plan lo lleva).
-    gap_modo: «No», «Contado» (va en el pago inicial) o «Financiado» (se suma al precio); el monto sale de TABLA_GAP
-    y solo aplica si ya tiene montos.
+    gap_modo: «No», «Contado» (va en el pago inicial) o «Financiado» (se suma al precio). gap_monto: el monto de
+    GAP de la cotización; si es 0 se busca en TABLA_GAP (pendiente).
     seguro1_fin: el seguro del año 1 se financia (no va en el pago inicial). resto_fin: el de los años 2+ se financia
     (si no, el cliente lo paga de contado cada año)."""
     v = CATALOGO[vehiculo]
     precio = precio_manual if precio_manual and precio_manual > 0 else v["msrp"]
     if not precio:
         raise ValueError(f"«{vehiculo}» no tiene precio en el boletín: captura el precio.")
-    gap = (monto_gap(precio) or 0.0) if gap_modo != "No" and gap_disponible() else 0.0
+    gap = 0.0
+    if gap_modo != "No":
+        gap = float(gap_monto) if gap_monto and gap_monto > 0 else ((monto_gap(precio) or 0.0) if gap_disponible()
+                                                                    else 0.0)
     d = dict(precio=precio, gap=gap if gap_modo == "Financiado" else 0.0,
              gap_contado=gap if gap_modo == "Contado" else 0.0, bono=v["bono"], pago=pago_inicial or pago,
              pago_inicial=pago_inicial or 0.0, seguro1=seguro1 or 0.0,
@@ -645,7 +648,8 @@ def pdf_bytes(res, cliente=""):
         est += [("BACKGROUND", (0, r), (-1, r), GRIS), ("SPAN", (3, r), (11, r))]
     tr.setStyle(TableStyle(est))
     story += [tr, Spacer(1, 8),
-              P("Mensualidad = pago fijo del capital + seguro de vida (0.82% anual sobre el capital). Desde el mes 13 "
+              P("Mensualidad = pago fijo del capital + seguro de vida (4.1% del capital repartido en el plazo; con "
+                "seguro financiado, 4.09% de capital + seguros). Desde el mes 13 "
                 "se suma el seguro de cada año financiado a 12 meses (aproximado al centavo). Comisión por apertura "
                 "= % + IVA sobre el monto total a financiar. Enganche menor a 20%: +4% a la tasa; máximo 75%. "
                 "No incluye Anualidades, University ni Seminuevos.", s_small)]
