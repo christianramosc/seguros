@@ -92,6 +92,12 @@ Botón **PDF del análisis**.
 del cliente, comisión, desembolso y pago inicial mínimos (+ seguro de contado) y la mensualidad con el enganche mínimo
 en cada plazo, de 12 meses al plazo máximo de cada plan (un bloque por auto, la menor de cada plazo en verde).
 
+**Seguro:** el del año 1 puede ir de **contado** (en el pago inicial) o **financiado** (se suma al monto a financiar,
+paga comisión y se amortiza en los meses 1-12 a la misma tasa); el de los años 2+ puede ir **financiado**
+(fraccionado desde el mes 13) o de **contado** (el cliente lo paga cada aniversario). Con seguro de contado los montos
+cuadran al centavo con el cotizador; con el del año 1 financiado, el seguro de vida sobre ese seguro es una
+aproximación hasta validarlo con una cotización.
+
 **Cada mes** actualiza en `oferta_mg.py`: `BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche
 sistema y tasas bajas), `CURVAS` y, cuando la tengas, `TABLA_GAP`.
 
