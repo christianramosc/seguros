@@ -22,7 +22,8 @@ Cálculo igual al cotizador de Autoexpress (validado contra cotizaciones reales,
   · Seguro año 1: contado (va en el pago inicial) o financiado (se suma al monto a financiar, paga comisión y se
     amortiza en los meses 1-12 a la misma tasa, igual que el de los años 2+). Seguro años 2+: financiado (cada año a
     12 meses desde el mes 13) o contado (el cliente lo paga cada aniversario; no sube la mensualidad).
-    El seguro de vida sobre el seguro financiado del año 1 es una aproximación (falta validarlo con una cotización).
+    Año 1 financiado = «Autoexpress Multianual Fraccionado»: el importe anual se financia también en el año 1
+    (validado con 2 cotizaciones, MG3 Style AT plan 415 y MG5 Elegance AT plan 448).
     El enganche incluye el bono cuando va al enganche.
   · Desembolso del cliente = lo que pone de su bolsa = pago inicial − bono al enganche. Es el dato que se captura:
     enganche = desembolso − seguro − GAP contado − comisión (+ bono si va al enganche).
@@ -203,7 +204,14 @@ def requiere_precio(vehiculo):
 # Cálculos (mismo método que el cotizador de Autoexpress)
 # ------------------------------------------------------------------------------------
 VIDA = 0.0082 / 12          # seguro de vida mensual sobre el capital
-VIDA_AJUSTE_SEGURO = 1.2387  # factor observado del seguro de vida sobre el seguro financiado (meses 13+)
+# Seguro de vida sobre el seguro financiado: VIDA × importe anual × (años de plazo) × 0.99073. Ajustado con 8
+# cotizaciones a 60 meses (seguro de contado y multianual fraccionado); diferencias de ±$0.05. En otros plazos se
+# supone proporcional a los años del plazo (falta validarlo).
+VIDA_FACTOR_SEGURO = 0.99073
+
+
+def vida_seguro(sa, n):
+    return VIDA * sa * (n / 12) * VIDA_FACTOR_SEGURO
 
 
 def tasa_con_iva(tasa, iva=True):
@@ -230,9 +238,10 @@ def evaluar(op, n, d):
     anios = n // 12 - 1                       # años de seguro que se financian
     c = op["cxa"] * (1 + IVA)
     precio, gap, bono = d["precio"], d["gap"], d["bono"]
-    s1 = d["seguro1"]
-    s1f = s1 if d.get("s1_fin") else 0.0                          # seguro año 1 financiado
-    s1c = s1 - s1f                                                 # seguro año 1 de contado (pago inicial)
+    # Año 1 financiado = «Autoexpress Multianual Fraccionado»: el importe primer año de la cotización es $0 y el
+    # importe anual se financia también en el año 1 (12 meses), igual que en los años 2+.
+    s1f = d["seguro_anual"] if d.get("s1_fin") else 0.0           # seguro año 1 financiado
+    s1c = 0.0 if d.get("s1_fin") else d["seguro1"]                # seguro año 1 de contado (pago inicial)
     sa = d["seguro_anual"] if d.get("resto_fin", True) else 0.0   # seguro años 2+ financiado
     if op["modo"] in ("tasa", "sin_bono"):
         candidatos = [("a tasa" if op["modo"] == "tasa" else "sin bono", precio + gap, 0.0)]
@@ -251,7 +260,7 @@ def evaluar(op, n, d):
         motivo = ""
         if eng_cli < 0:
             motivo = "El desembolso no alcanza para seguro y comisión"
-        elif pct < op["min"] - 1e-9:
+        elif pct < op["min"] - 1e-6:
             motivo = f"Enganche {pct:.2%} menor al mínimo {op['min']:.0%}"
         elif op["max"] is not None and pct >= op["max"] - 1e-9:
             motivo = f"Enganche {pct:.1%}: aplica desde {op['max']:.0%} otra tasa"
@@ -263,13 +272,13 @@ def evaluar(op, n, d):
         pm = round(pago_fijo(max(cap, 0), ti, n), 2)
         vida1 = round(max(cap, 0) * VIDA, 2)
         m1 = pm + vida1
-        if s1f:   # seguro año 1 financiado: se amortiza en los meses 1-12 (seguro de vida aproximado)
-            m1 = pm + round(pago_fijo(s1f, ti, 12), 2) + round(vida1 + VIDA * s1f * (n / 12) * VIDA_AJUSTE_SEGURO, 2)
+        if s1f:   # seguro año 1 financiado (multianual fraccionado): se amortiza en los meses 1-12
+            m1 = pm + round(pago_fijo(s1f, ti, 12), 2) + round(vida1 + vida_seguro(s1f, n), 2)
         m2 = None
         if anios > 0:
             m2 = pm + vida1
             if sa:
-                m2 = pm + round(pago_fijo(sa, ti, 12), 2) + round(vida1 + VIDA * sa * anios * VIDA_AJUSTE_SEGURO, 2)
+                m2 = pm + round(pago_fijo(sa, ti, 12), 2) + round(vida1 + vida_seguro(sa, n), 2)
         total = m1 * min(n, 12) + (m2 * (n - 12) if m2 else 0)
         r = dict(valida=not motivo, motivo=motivo, forma=forma, base=base, pct=pct, eng_cliente=eng_cli,
                  pct_cliente=pct_cli,
@@ -369,9 +378,10 @@ def requisito(op, d, n=None):
     anios = n // 12 - 1
     c = op["cxa"] * (1 + IVA)
     cap = base - cli_monto - bono_eng
-    s1f = d["seguro1"] if d.get("s1_fin") else 0.0
+    s1f = d["seguro_anual"] if d.get("s1_fin") else 0.0
+    s1c = 0.0 if d.get("s1_fin") else d["seguro1"]
     sa = d["seguro_anual"] if d.get("resto_fin", True) else 0.0
-    desembolso_min = cli_monto + (d["seguro1"] - s1f) + d["gap_contado"] + c * (cap + s1f + sa * anios)
+    desembolso_min = cli_monto + s1c + d["gap_contado"] + c * (cap + s1f + sa * anios)
     return dict(oferta=op["nombre"], baremo=op["baremo"], cxa=op["cxa"], tasas=texto_tasas(op),
                 min_sistema=op["min"], min_max=op["max"], min_cliente=cli_pct, min_cliente_monto=cli_monto,
                 bono=forma, desembolso_min=math.ceil(round(desembolso_min, 2)),
