@@ -73,7 +73,7 @@ with st.container(border=True):
                      + (f" · sistema {v['color']}% ({om.COLORES[v['color']]})" if v["color"] else "")))
     else:
         c1.caption("Sin precio en el boletín: captúralo en «Precio».")
-    s1, s2, _ = st.columns([2, 2, 3])
+    s1, s2, s3, s4 = st.columns([2, 2, 2, 1.4])
     seguro1_fin = (s1.segmented_control("Seguro año 1", ["Contado", "Financiado"], default="Contado",
                                         key="of_seg1_modo",
                                         help="Contado: va en el pago inicial. Financiado (Autoexpress Multianual "
@@ -86,12 +86,13 @@ with st.container(border=True):
                                       help="Financiado: cada año se suma a 12 meses desde el mes 13 (fraccionado). "
                                            "Contado: el cliente lo paga cada aniversario y la mensualidad no sube.")
                  or "Financiado") == "Financiado"
+    gap_modo = s3.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap",
+                                    help="Contado: va en el pago inicial. Financiado: se suma al precio, entra al "
+                                         "enganche % y al crédito. Captura el monto de la cotización.") or "No"
+    gap_monto = s4.number_input("Monto GAP", min_value=0.0, value=0.0, step=100.0, key="of_gap_monto",
+                                disabled=gap_modo == "No", help="El GAP de la cotización (depende del auto).")
     with st.expander("Más opciones"):
-        e1, e2, e3 = st.columns([2, 3, 2])
-        gap_modo = e1.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap",
-                                        disabled=not om.gap_disponible(),
-                                        help="Contado: va en el pago inicial. Financiado: se suma al precio."
-                                        + ("" if om.gap_disponible() else " Falta cargar TABLA_GAP.")) or "No"
+        e2, e3 = st.columns([3, 2])
         cliente = e2.text_input("Cliente (para el PDF)", key="of_cli")
         iva = e3.toggle("IVA sobre intereses", value=True, key="of_iva")
 
@@ -120,11 +121,16 @@ def pdf(a, cliente):
 
 
 args = (veh, float(pago), float(seguro1), float(seguro_anual), int(plazo), float(precio_manual), gap_modo, iva,
-        float(pago_inicial) if captura == "Pago inicial" else 0.0, seguro1_fin, resto_fin)
+        float(pago_inicial) if captura == "Pago inicial" else 0.0, seguro1_fin, resto_fin,
+        float(gap_monto) if gap_modo != "No" else 0.0)
 res = correr(*args)
 ranking = res["ranking"]
 if gap_modo != "No" and not res["gap"]:
-    st.warning("Este precio no tiene monto de GAP en la tabla: se calcula sin GAP.")
+    st.warning("Captura el monto de GAP de la cotización: sin él se calcula sin GAP.")
+elif res["gap"]:
+    st.caption(D(f":material/shield_with_heart: GAP {gap_modo.lower()} de {om.money(res['gap'])}"
+                 + (" (va en el pago inicial)." if gap_modo == "Contado" else
+                    " (se suma al precio: entra al enganche % y al crédito).")))
 
 # ----------------------------------------------------------------------------- mejor opción
 if ranking:

@@ -72,9 +72,9 @@ Baja el bono va a la tasa y el desembolso es todo el pago inicial.
 - Desde el mes 13 se suma el seguro de cada año financiado a 12 meses (los meses 13+ son aproximados al centavo).
 - Enganche % sobre precio + GAP (si se incluye).
 
-**GAP (pendiente):** la cotización puede llevar GAP o no, y cada rango de precio del vehículo tiene su monto. El
-selector «GAP» (No / Contado / Financiado) queda desactivado hasta cargar la tabla en `oferta_mg.py` (`TABLA_GAP`, lista de
-`(precio_hasta, monto_gap)`); en cuanto tenga montos se activa solo.
+**GAP:** la cotización puede llevarlo o no. En la app eliges **No / Contado / Financiado** y capturas el monto de
+la cotización (depende del auto). Contado va en el pago inicial; financiado se suma al precio, entra al enganche % y
+al crédito. `TABLA_GAP` en `oferta_mg.py` queda como respaldo si algún día se tiene la tabla por rango de precio.
 
 **Enganche mínimo real del cliente** (lo que pone de su bolsa): con bono al enganche = enganche sistema según el
 color de la tabla de bonos − % del bono, exacto (la columna del boletín lo redondea: 9.96% aparece como 10%; el
