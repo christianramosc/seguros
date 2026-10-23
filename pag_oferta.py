@@ -61,10 +61,11 @@ with st.container(border=True):
     c5, c6, c7, c8 = st.columns([3, 2, 2, 2])
     plazo = c5.segmented_control("Plazo", om.PLAZOS, default=60, key="of_plazo",
                                  format_func=lambda n: f"{n} m") or 60
-    seguro1 = c6.number_input("Seguro año 1 (contado)", min_value=0.0, value=0.0, step=500.0, key="of_seg",
-                              help="Déjalo en 0 si aún no lo tienes: la tabla dice hasta cuánto puede valer.")
+    seguro1 = c6.number_input("Seguro año 1", min_value=0.0, value=0.0, step=500.0, key="of_seg",
+                              help="Importe primer año. Déjalo en 0 si aún no lo tienes: la tabla dice hasta cuánto "
+                                   "puede valer. Contado o financiado se elige abajo.")
     seguro_anual = c7.number_input("Seguro anual (años 2+)", min_value=0.0, value=0.0, step=500.0,
-                                   key="of_seg_anual", help="Se financia desde el mes 13. En 0 = igual al año 1.")
+                                   key="of_seg_anual", help="Importe anual resto del plazo. En 0 = igual al año 1.")
     precio_manual = c8.number_input("Precio", min_value=0, value=0, step=1000, key="of_precio",
                                     help="0 = precio de lista. Obligatorio en Lanzamiento y «Otro».")
     if v["msrp"]:
@@ -72,6 +73,17 @@ with st.container(border=True):
                      + (f" · sistema {v['color']}% ({om.COLORES[v['color']]})" if v["color"] else "")))
     else:
         c1.caption("Sin precio en el boletín: captúralo en «Precio».")
+    s1, s2, _ = st.columns([2, 2, 3])
+    seguro1_fin = (s1.segmented_control("Seguro año 1", ["Contado", "Financiado"], default="Contado",
+                                        key="of_seg1_modo",
+                                        help="Contado: va en el pago inicial. Financiado: se suma al monto a "
+                                             "financiar, paga comisión y se amortiza en los meses 1-12.")
+                   or "Contado") == "Financiado"
+    resto_fin = (s2.segmented_control("Seguro años 2+", ["Financiado", "Contado"], default="Financiado",
+                                      key="of_seg2_modo",
+                                      help="Financiado: cada año se suma a 12 meses desde el mes 13 (fraccionado). "
+                                           "Contado: el cliente lo paga cada aniversario y la mensualidad no sube.")
+                 or "Financiado") == "Financiado"
     with st.expander("Más opciones"):
         e1, e2, e3 = st.columns([2, 3, 2])
         gap_modo = e1.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap",
@@ -106,7 +118,7 @@ def pdf(a, cliente):
 
 
 args = (veh, float(pago), float(seguro1), float(seguro_anual), int(plazo), float(precio_manual), gap_modo, iva,
-        float(pago_inicial) if captura == "Pago inicial" else 0.0)
+        float(pago_inicial) if captura == "Pago inicial" else 0.0, seguro1_fin, resto_fin)
 res = correr(*args)
 ranking = res["ranking"]
 if gap_modo != "No" and not res["gap"]:
@@ -134,6 +146,12 @@ else:
 if not seguro1:
     st.caption(":material/warning: Seguro en \\$0: todo va a enganche. La columna «Póliza año 1» dice hasta cuánto "
                "puede valer.")
+if seguro1 and seguro1_fin:
+    st.caption(":material/info: Seguro del año 1 financiado: no va en el pago inicial, paga comisión y sube la "
+               "mensualidad de los meses 1-12. El seguro de vida sobre ese seguro es aproximado (centavos).")
+if not resto_fin:
+    st.caption(D(":material/info: Seguro de los años 2+ de contado: el cliente paga "
+                 f"{om.money(res['seguro_anual'])} en cada aniversario; la mensualidad no sube desde el mes 13."))
 
 # ----------------------------------------------------------------------------- todos los planes
 st.markdown(f"##### :material/leaderboard: Planes a {plazo} meses")
