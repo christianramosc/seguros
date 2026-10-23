@@ -3,14 +3,14 @@
 Mejor oferta MG Financial Services — motor de cálculo y PDF.
 
 Compara todas las ofertas del boletín para un auto (Tasa Baja 0% CXA, Tasa Baja 2% CXA, Lanzamiento 8.99%,
-Estándar 13.74%, Estándar 17.74% y Especial 12.09%), aplica el bono de la forma que convenga (a tasa / al enganche /
-al precio, excluyente) y dice la mejor opción por plazo y cuánto puede valer el seguro de contado para que cada
+Estándar 13.74%, Estándar 17.74% y Especial 12.09%), aplica el bono de la forma que corresponda (a la tasa o al
+enganche, excluyente) y dice la mejor opción por plazo y cuánto puede valer el seguro de contado para que cada
 opción siga siendo la ideal.
 
 Reglas (boletín BMGFS-16-10-2026, vigente del 09-oct al 02-nov-2026):
   · Tasa baja: el bono ya va a la tasa → el cliente paga precio de lista.
-  · Bono flexible (Estándar / 12.09%): bono al enganche o al precio; el enganche mínimo de los vehículos con bono
-    INCLUYE el bono aplicado al enganche.
+  · Planes Estándar / 12.09% con bono: el bono va al enganche (no al precio); el enganche mínimo de los vehículos
+    con bono INCLUYE el bono aplicado al enganche.
   · Enganche < 20% → +4% a la tasa (plan 17.74% para modelos sin bono, desde 10%). Enganche máximo 75%.
   · Enganche mínimo real del cliente (bono al enganche) = enganche sistema − % del bono, exacto. La columna
     «Enganche mínimo real del cliente» del boletín lo redondea (p. ej. 9.96% aparece como 10%); el cotizador acepta
@@ -144,7 +144,7 @@ def especial_1209():
 # ------------------------------------------------------------------------------------
 # Ofertas aplicables al vehículo
 #   modo "tasa"     → bono subsidiado en tasa, cliente paga precio de lista
-#   modo "flexible" → bono al enganche o al precio
+#   modo "flexible" → bono al enganche
 #   modo "sin_bono" → no lleva bono
 # ------------------------------------------------------------------------------------
 def ofertas_para(v):
@@ -164,11 +164,11 @@ def ofertas_para(v):
                         tasas={p: 8.99 for p in [12, 24, 36, 48, 60]}))
     modo_std = "flexible" if v["bono"] > 0 else "sin_bono"
     if color:   # vehículo marcado en la tabla de bonos
-        ops.append(dict(nombre=f"Estándar 13.74% + 0% CXA (bono flexible)", baremo="413/419", cxa=0.00,
+        ops.append(dict(nombre=f"Estándar 13.74% + 0% CXA (bono al enganche)", baremo="413/419", cxa=0.00,
                         modo=modo_std, min=(color + 10)/100, max=None, tasas=estandar_1374()))
-        ops.append(dict(nombre=f"Estándar 17.74% + 0% CXA (bono flexible)", baremo="414/441", cxa=0.00,
+        ops.append(dict(nombre=f"Estándar 17.74% + 0% CXA (bono al enganche)", baremo="414/441", cxa=0.00,
                         modo=modo_std, min=color/100, max=None, tasas=estandar_1774(True)))
-        ops.append(dict(nombre=f"Especial 12.09% + 2% CXA (bono flexible)", baremo="420/446", cxa=0.02,
+        ops.append(dict(nombre=f"Especial 12.09% + 2% CXA (bono al enganche)", baremo="420/446", cxa=0.02,
                         modo=modo_std, min=(color + 20)/100, max=None, tasas=especial_1209()))
     else:       # toda la gama sin marca
         ops.append(dict(nombre="Estándar 13.74% + 0% CXA", baremo="412/417", cxa=0.00,
@@ -256,7 +256,7 @@ def evaluar(op, n, d):
     elif d.get("pago_inicial"):   # el pago inicial capturado ya trae el bono al enganche (como en la cotización)
         candidatos = [("al enganche", precio + gap, bono)]
     else:
-        candidatos = [("al enganche", precio + gap, bono), ("al precio", precio - bono + gap, 0.0)]
+        candidatos = [("al enganche", precio + gap, bono)]
     primero = None
     for forma, base, bono_eng in candidatos:
         pago = d["pago_inicial"] - bono_eng if d.get("pago_inicial") else d["pago"]
@@ -376,7 +376,7 @@ def requisito(op, d, n=None):
     if op["modo"] == "flexible":
         bono_eng = bono
         cli_pct = op["min"] - bono / base
-        forma = "al enganche o al precio"
+        forma = "al enganche"
     else:
         bono_eng = 0.0
         cli_pct = op["min"]
@@ -416,8 +416,7 @@ def describir(vehiculo, precio, bono):
         txt = (f"Marcado en {COLORES[v['color']]} en la tabla de bonos (enganche sistema {v['color']}%). Bono MG de "
                f"{money0(bono)} ({pct_b:.1%} del precio de lista {money0(precio)}), pagado 100% por MG Motors "
                f"México. El bono se usa de una sola forma: a la tasa (planes de Tasa Baja: el cliente paga precio de "
-               f"lista y aporta todo el enganche) o al enganche / al precio (planes Estándar y Especial, bono "
-               f"flexible). Con el bono al enganche el cliente aporta desde {real:.2%} ({money0(real * precio)}) "
+               f"lista y aporta todo el enganche) o al enganche (planes Estándar y Especial). Con el bono al enganche el cliente aporta desde {real:.2%} ({money0(real * precio)}) "
                f"y el bono completa el {v['color']}% del sistema en el plan 17.74%; los planes 13.74% y 12.09% piden "
                f"{v['color'] + 10}% y {v['color'] + 20}%.")
     elif v["lanz"]:
