@@ -95,8 +95,8 @@ en cada plazo, de 12 meses al plazo máximo de cada plan (un bloque por auto, la
 **Seguro:** el del año 1 puede ir de **contado** (en el pago inicial) o **financiado** («Autoexpress Multianual
 Fraccionado»: el importe anual se financia también el año 1, se amortiza en los meses 1-12, paga comisión y la
 cotización muestra el importe primer año en $0); el de los años 2+ puede ir **financiado** (fraccionado desde el mes
-13) o de **contado** (el cliente lo paga cada aniversario). Validado con 12 cotizaciones reales (36, 48 y 60 meses, contado y multianual): monto a financiar, comisión,
-pago inicial y mensualidad al centavo (23 de 24 mensualidades exactas, la otra a $0.01).
+13) o de **contado** (el cliente lo paga cada aniversario). Validado con 15 cotizaciones reales (12, 24, 36, 48 y 60 meses, contado y multianual): monto a financiar,
+comisión, pago inicial y mensualidad al centavo (27 de 29 mensualidades exactas, las otras 2 a $0.01).
 
 **Cada mes** actualiza en `oferta_mg.py`: `BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche
 sistema y tasas bajas), `CURVAS` y, cuando la tengas, `TABLA_GAP`.
