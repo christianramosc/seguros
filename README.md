@@ -57,7 +57,7 @@ seguro anual del resto del plazo, el plazo y, si aplica, el precio. Arriba queda
 desembolso, tasa, mensualidad y plazo, y abajo **hasta cuánto puede valer la póliza** (seguro año 1) en cada plan para
 que cumpla sus condiciones. Ej.: MG5 2027 1.5L COM EXCITE MT con pago inicial de $120,000 → desembolso $60,000 (bono
 de $60,000 al enganche) y, en el plan 17.74%, la póliza puede valer hasta $16,800 (enganche 30% = $103,200).
-Con pago inicial capturado, los planes con bono llevan el bono al enganche (como en la cotización); en Tasa
+Con pago inicial capturado, los planes con bono al enganche descuentan el bono del desembolso (como en la cotización); en Tasa
 Baja el bono va a la tasa y el desembolso es todo el pago inicial.
 
 - **Pago inicial** (igual que la cotización) = enganche + comisión por contratación del crédito + seguro contado año
@@ -98,6 +98,10 @@ cotización muestra el importe primer año en $0); el de los años 2+ puede ir *
 13) o de **contado** (el cliente lo paga cada aniversario). Validado con 18 cotizaciones reales (12, 24, 36, 48, 60 y 72 meses; contado y multianual; planes 413, 414, 415,
 420, 448, 463 y 470): monto a financiar, comisión, pago inicial y mensualidad al centavo (31 de 33 mensualidades
 exactas, las otras 2 a $0.01).
+
+**Bono:** en Tasa Baja va a la tasa. En los planes Estándar 13.74%, 17.74% y Especial 12.09% puede ir **al enganche**
+o **al precio**, y cada forma aparece como una opción separada en el comparativo (al precio, el auto queda en precio −
+bono y el enganche mínimo se calcula sobre ese precio).
 
 **Cada mes** actualiza en `oferta_mg.py`: `BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche
 sistema y tasas bajas), `CURVAS` y, cuando la tengas, `TABLA_GAP`.
