@@ -129,6 +129,8 @@ ranking = res["ranking"]
 if ranking:
     _, op, ev = ranking[0]
     seccion("Mejor opción", f"{op['nombre']} · baremo {op['baremo']} · bono {ev['forma']}")
+    if ev["bono_precio"]:
+        insignias([f"Precio del plan: {om.texto_precio(ev)}"], ok=(f"Precio del plan: {om.texto_precio(ev)}",))
     k = st.columns(5)
     tarjeta(k[0], "", "Mensualidad", om.money(ev["mens"]),
             "Meses 1-12" + (f" · 13+: {om.money(ev['mens2'])}" if ev["mens2"] and MOSTRAR_SEGURO_2 else ""),
@@ -162,16 +164,18 @@ for o in sorted(res["ops"], key=lambda o: orden.get(o["nombre"], 99)):
     if not e:
         filas.append(fila | {"Nota": "No maneja este plazo"})
         continue
-    fila |= {"Bono": e["forma"], "Pago inicial": e["pago_inicial"], "Desembolso": e["desembolso"],
-             "Enganche": f"{e['pct']:.1%}"}
+    fila |= {"Bono": e["forma"],
+             "Precio": (f"{om.money0(e['precio_plan'])} (−{om.money0(e['bono_precio'])})" if e["bono_precio"]
+                        else om.money0(e["precio_plan"])), "Pago inicial": e["pago_inicial"],
+             "Desembolso": e["desembolso"], "Enganche": f"{e['pct']:.1%}"}
     if e["valida"]:
         fila |= {"Mensualidad": e["mens"], "Mens. 13+": e["mens2"], "Tasa": f"{e['tasa']:.2f}%",
                  "Total": e["total"]}
     else:
         fila["Nota"] = e["motivo"]
     filas.append(fila)
-cols = ["#", "Oferta", "Mensualidad", "Mens. 13+", "Tasa", "Pago inicial", "Desembolso", "Enganche", "Bono",
-        "Total", "Póliza año 1", "Nota"]
+cols = ["#", "Oferta", "Mensualidad", "Mens. 13+", "Tasa", "Precio", "Pago inicial", "Desembolso", "Enganche",
+        "Bono", "Total", "Póliza año 1", "Nota"]
 df = pd.DataFrame(filas).reindex(columns=cols)
 if not MOSTRAR_SEGURO_2 or (not seguro_anual and not seguro1):
     df = df.drop(columns="Mens. 13+")
@@ -185,8 +189,10 @@ st.dataframe(df.style.apply(lambda r: [RESALTE if r["#"] == "1" else APAGADO if 
                             axis=1),
              hide_index=True, width="stretch",
              column_config={"#": st.column_config.TextColumn("#", width="small"), "Oferta": TEXTO_L("Oferta"),
+                            "Precio": st.column_config.TextColumn("Precio", help="Con el bono al precio: precio de lista − bono"),
                             "Nota": TEXTO_L("Nota")})
-nota("«Póliza año 1»: rango del seguro con el que el plan cumple. En gris, los planes que no aplican.")
+nota("«Precio»: con el bono al precio, el precio de lista ya con el bono descontado (el enganche % se calcula sobre ese precio). "
+     "«Póliza año 1»: rango del seguro con el que el plan cumple. En gris, los planes que no aplican.")
 
 # ----------------------------------------------------------------------------- detalle
 seccion("Detalle")
@@ -214,6 +220,8 @@ with t_min:
     filas_min, valores = [], []
     for q in res["requisitos"]:
         fila = {"Oferta": q["oferta"],
+                "Precio": (f"{om.money0(q['precio_plan'])} (−{om.money0(q['bono_precio'])})" if q["bono_precio"]
+                           else om.money0(q["precio_plan"])),
                 "Eng. sistema": f"{q['min_sistema']:.0%}" + (f" a <{q['min_max']:.0%}" if q["min_max"] else ""),
                 "Eng. cliente": f"{q['min_cliente']:.2%} · {om.money0(q['min_cliente_monto'])}",
                 "Desembolso mín.": q["desembolso_min"], "Pago inicial mín.": q["pago_inicial_min"]}
@@ -243,7 +251,7 @@ slug = re.sub(r"[^A-Za-z0-9]+", "_", veh).strip("_")
 d1, d2 = st.columns(2)
 with d1.container(border=True):
     st.markdown("**PDF del análisis**")
-    nota("Esta cotización: mejor opción, todos los planes y mensualidades por plazo.")
+    nota("Esta cotización: mejor opción, comparativo de planes, mensualidad por plazo y requisitos del auto.")
     cliente = st.text_input("Cliente", key="of_cli", placeholder="Nombre del cliente (opcional)",
                             label_visibility="collapsed")
     st.download_button("Descargar análisis", pdf(args, cliente.strip()),

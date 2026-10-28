@@ -297,6 +297,9 @@ def evaluar(op, n, d):
                  cxa=c * (cap + s1f + sa * anios), tasa=op["tasas"][n], tasa_iva=ti, pago_capital=pm, vida=vida1,
                  mens=m1, mens2=m2, total=total, plazo=n, seguro1=s1c, seguro1_fin=s1f, gap_contado=d["gap_contado"],
                  resto_fin=bool(sa), aprox_vida=bool(s1f),
+                 # precio del plan: con el bono al precio, el precio de lista menos el bono
+                 precio_lista=precio, bono_precio=bono if forma == "al precio" else 0.0,
+                 precio_plan=precio - (bono if forma == "al precio" else 0.0),
                  desembolso=pago, pago_inicial=eng_tot + c * (cap + s1f + sa * anios) + s1c + d["gap_contado"])
         if r["valida"]:
             return r
@@ -400,7 +403,9 @@ def requisito(op, d, n=None):
     desembolso_min = cli_monto + s1c + d["gap_contado"] + c * (cap + s1f + sa * anios)
     return dict(oferta=op["nombre"], baremo=op["baremo"], cxa=op["cxa"], tasas=texto_tasas(op),
                 min_sistema=op["min"], min_max=op["max"], min_cliente=cli_pct, min_cliente_monto=cli_monto,
-                bono=forma, desembolso_min=math.ceil(round(desembolso_min, 2)),
+                bono=forma, precio_plan=precio - (bono if forma == "al precio" else 0.0),
+                bono_precio=bono if forma == "al precio" else 0.0,
+                desembolso_min=math.ceil(round(desembolso_min, 2)),
                 pago_inicial_min=math.ceil(round(desembolso_min + bono_eng, 2)), plazo_pago_min=n)
 
 
@@ -477,7 +482,7 @@ def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_man
                 seguro_anual=d["seguro_anual"], seguro_anual_estimado=not seguro_anual and bool(seguro1),
                 seguro1_fin=bool(seguro1_fin), resto_fin=bool(resto_fin),
                 plazo=plazo, iva=iva, ops=ops, evals=evals, ranking=ranking, matriz=matriz, mejores=mejores,
-                rangos=rangos, tramos=tramos_seguro(ops, plazo, d),
+                rangos=rangos,
                 color=COLORES.get(v["color"]), descripcion=describir(vehiculo, precio, v["bono"]),
                 requisitos=[requisito(o, d, plazo) for o in ops],
                 mens_min={o["nombre"]: mens_minimo(o, d) for o in ops})
@@ -499,6 +504,13 @@ def texto_mens(t):
     if abs(t["mens_min"] - t["mens_max"]) < 0.01:
         return money(t["mens_min"])
     return f"{money(t['mens_min'])} a {money(t['mens_max'])}"
+
+
+def texto_precio(ev):
+    """Precio del plan: con el bono al precio muestra el descuento («$490,000 − $90,500 = $399,500»)."""
+    if ev.get("bono_precio"):
+        return f"{money0(ev['precio_lista'])} − bono {money0(ev['bono_precio'])} = {money0(ev['precio_plan'])}"
+    return money0(ev["precio_plan"])
 
 
 def desglose(ev):
@@ -529,245 +541,253 @@ def desglose_desembolso(ev):
 # PDF
 # ------------------------------------------------------------------------------------
 def pdf_bytes(res, cliente=""):
-    """PDF del análisis (bytes)."""
+    """PDF del análisis (bytes): resumen y mejor opción, comparativo de planes, mensualidades por plazo y requisitos
+    de la oferta para el auto."""
     from reportlab.lib.pagesizes import letter, landscape
     from reportlab.lib import colors
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.enums import TA_CENTER, TA_RIGHT
     from reportlab.platypus import (BaseDocTemplate, PageTemplate, Frame, Paragraph, Spacer, Table, TableStyle,
-                                    PageBreak, KeepTogether)
-    from reportlab.graphics.shapes import Drawing, Rect, String
+                                    KeepTogether, CondPageBreak)
 
-    ROJO = colors.HexColor("#C8102E"); NEGRO = colors.HexColor("#1A1A1A")
-    GRIS = colors.HexColor("#F3F3F3"); GRIS2 = colors.HexColor("#D9D9D9")
-    TXT2 = colors.HexColor("#5A5A5A"); VERDE = colors.HexColor("#E6F4EA"); VERDE_T = colors.HexColor("#1E7B34")
-    PALETA = [colors.HexColor(c) for c in ["#C8102E", "#1F4E79", "#2E8B57", "#E07B00", "#6A3D9A", "#00838F",
-                                           "#8D6E63"]]
+    ROJO = colors.HexColor("#C8102E"); NEGRO = colors.HexColor("#18181B"); GRIS = colors.HexColor("#F4F4F5")
+    GRIS2 = colors.HexColor("#E4E4E7"); TXT2 = colors.HexColor("#52525B"); TXT3 = colors.HexColor("#71717A")
+    VERDE = colors.HexColor("#E8F5EC"); VERDE_T = colors.HexColor("#15803D"); BLANCO = colors.white
     W, H = landscape(letter)
-    M = 36
+    M = 34
     ancho = W - 2 * M
-    plazo, pago, seguro = res["plazo"], res["pago"], res["seguro"]   # pago = desembolso del cliente
+    plazo, seguro = res["plazo"], res["seguro"]
+    ranking = res["ranking"]
 
-    def st(name, size=9, color=NEGRO, bold=False, align=0, leading=None):
+    def st(name, size=8.5, color=NEGRO, bold=False, align=0, leading=None):
         return ParagraphStyle(name, fontName="Helvetica-Bold" if bold else "Helvetica", fontSize=size,
                               textColor=color, alignment=align, leading=leading or size * 1.25)
-    s_h1, s_sub, s_h2 = st("h1", 20, NEGRO, True), st("sub", 10, TXT2), st("h2", 13, ROJO, True)
-    s_p, s_small = st("p", 9, NEGRO, leading=12), st("sm", 7.5, TXT2, leading=9.5)
-    s_cell, s_cell_b = st("c", 8, NEGRO, leading=10), st("cb", 8, NEGRO, True, leading=10)
-    s_cell_c, s_gris = st("cc", 8, NEGRO, align=TA_CENTER, leading=10), st("g", 7.5, TXT2, leading=9.5)
-    s_head = st("hd", 7.5, colors.white, True, TA_CENTER, 9.5)
-    s_lbl, s_det = st("lbl", 8, TXT2, True, TA_CENTER), st("det", 7.5, TXT2, align=TA_CENTER, leading=9.5)
-    s_val = st("val", 18, NEGRO, True, TA_CENTER, 22)
-    P = lambda t, s=s_cell: Paragraph(str(t), s)
+    s_h1, s_sub = st("h1", 19, NEGRO, True, leading=22), st("sub", 9, TXT2)
+    s_h2, s_h2d = st("h2", 12, NEGRO, True, leading=15), st("h2d", 8, TXT3)
+    s_p, s_small = st("p", 8.5, TXT2, leading=11.5), st("sm", 7, TXT3, leading=9)
+    s_c, s_cb = st("c", 8, leading=10), st("cb", 8, NEGRO, True, leading=10)
+    s_cc, s_ccb = st("cc", 8, align=TA_CENTER, leading=10), st("ccb", 8, NEGRO, True, TA_CENTER, 10)
+    s_cr, s_crb = st("cr", 8, align=TA_RIGHT, leading=10), st("crb", 8, NEGRO, True, TA_RIGHT, 10)
+    s_head = st("hd", 7.2, BLANCO, True, TA_CENTER, 9)
+    s_lbl, s_val, s_det = st("lbl", 7, TXT3, True, leading=9), st("val", 15, NEGRO, True, leading=18), \
+        st("det", 7, TXT2, leading=9)
+    P = lambda t, s=s_c: Paragraph(str(t), s)
+    gris = lambda t: f"<font size=6.6 color='#71717A'>{t}</font>"
 
     def encabezado(c, doc):
         c.saveState()
-        c.setFillColor(NEGRO); c.rect(0, H - 34, W, 34, fill=1, stroke=0)
-        c.setFillColor(ROJO); c.rect(0, H - 37, W, 3, fill=1, stroke=0)
-        c.setFillColor(colors.white); c.setFont("Helvetica-Bold", 12)
-        c.drawString(M, H - 22, "MG FINANCIAL SERVICES  |  Análisis de mejor oferta")
-        c.setFont("Helvetica", 9)
-        c.drawRightString(W - M, H - 22, f"Oferta comercial {OFERTA_MES.lower()} · {BOLETIN}")
-        c.setFillColor(TXT2); c.setFont("Helvetica", 7.5)
-        c.drawString(M, 20, "Cálculo con el método del cotizador de Autoexpress. Cifras de referencia: verificar en "
-                            "el cotizador oficial.")
-        c.drawRightString(W - M, 20, f"Página {doc.page}")
+        c.setFillColor(NEGRO); c.rect(0, H - 30, W, 30, fill=1, stroke=0)
+        c.setFillColor(ROJO); c.rect(0, H - 30, 6, 30, fill=1, stroke=0)
+        c.setFillColor(BLANCO); c.setFont("Helvetica-Bold", 10.5)
+        c.drawString(M, H - 19.5, "MG FINANCIAL SERVICES")
+        c.setFont("Helvetica", 9); c.setFillColor(colors.HexColor("#A1A1AA"))
+        c.drawString(M + c.stringWidth("MG FINANCIAL SERVICES", "Helvetica-Bold", 10.5) + 12, H - 19.5,
+                     "Análisis de la mejor oferta")
+        c.drawRightString(W - M, H - 19.5, f"Oferta {OFERTA_MES.lower()} · {BOLETIN} · vigente {VIGENCIA}")
+        c.setStrokeColor(GRIS2); c.setLineWidth(0.6); c.line(M, 26, W - M, 26)
+        c.setFillColor(TXT3); c.setFont("Helvetica", 7)
+        c.drawString(M, 15, "Cálculo con el método del cotizador de Autoexpress Inbursa. Cifras de referencia: verifica "
+                            "la cotización final en el cotizador oficial.")
+        c.drawRightString(W - M, 15, f"Página {doc.page}")
         c.restoreState()
 
-    archivo = io.BytesIO()
-    doc = BaseDocTemplate(archivo, pagesize=landscape(letter), leftMargin=M, rightMargin=M, topMargin=52,
-                          bottomMargin=36, title=f"Mejor oferta {res['vehiculo']}", author="MG Colima")
-    doc.addPageTemplates([PageTemplate(id="p", onPage=encabezado, frames=[Frame(M, 36, ancho, H - 88, id="f")])])
-    story = [P(res["vehiculo"], s_h1)]
-    sub = (f"Precio {money0(res['precio'])} · bono MG {money0(res['bono'])}"
-           + (f" · GAP {res['gap_modo'].lower()} {money0(res['gap'])}" if res["gap"] else "")
-           + f" · seguro 1er año {money(seguro) if seguro else 'por definir'}"
-           + (" (financiado)" if seguro and res.get("seguro1_fin") else " (contado)" if seguro else "")
-           + (f" · seguro anual resto del plazo {money(res['seguro_anual'])}"
-              + (" (estimado)" if res["seguro_anual_estimado"] else "")
-              + (" financiado" if res.get("resto_fin", True) else " de contado cada año")
-              if res["seguro_anual"] and res.get("resto_fin", True) else "")
-           + f" · generado el {datetime.now():%d/%m/%Y}")
-    if cliente.strip():
-        sub = f"Cliente: <b>{cliente.strip()}</b> · " + sub
-    story += [P(sub, s_sub), Spacer(1, 10)]
+    def titulo(texto, detalle=""):
+        t = Table([[P(texto, s_h2), P(detalle, st("h2r", 8, TXT3, align=TA_RIGHT))]],
+                  colWidths=[ancho * 0.55, ancho * 0.45])
+        t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "BOTTOM"), ("LINEBELOW", (0, 0), (-1, 0), 1.2, NEGRO),
+                               ("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                               ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
+        return [t, Spacer(1, 6)]
 
-    ranking = res["ranking"]
+    def tabla(filas, cw, estilo_extra=(), repetir=1, pad=4.5):
+        t = Table(filas, colWidths=[ancho * x for x in cw], repeatRows=repetir)
+        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                               ("LINEBELOW", (0, 1), (-1, -1), 0.4, GRIS2), ("TOPPADDING", (0, 0), (-1, -1), pad),
+                               ("BOTTOMPADDING", (0, 0), (-1, -1), pad), ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                               ("RIGHTPADDING", (0, 0), (-1, -1), 5)] + list(estilo_extra)))
+        return t
+
+    archivo = io.BytesIO()
+    doc = BaseDocTemplate(archivo, pagesize=landscape(letter), leftMargin=M, rightMargin=M, topMargin=44,
+                          bottomMargin=34, title=f"Mejor oferta {res['vehiculo']}", author="MG Colima")
+    doc.addPageTemplates([PageTemplate(id="p", onPage=encabezado, frames=[Frame(M, 32, ancho, H - 76, id="f")])])
+
+    # ---------------------------------------------------------------- encabezado del análisis
+    story = [P(res["vehiculo"], s_h1)]
+    linea = [f"Generado el {datetime.now():%d/%m/%Y}"]
+    if cliente.strip():
+        linea.insert(0, f"Cliente: <b>{cliente.strip()}</b>")
+    story += [P(" · ".join(linea), s_sub), Spacer(1, 8)]
+    seg_txt = (f"{money(seguro)} " + ("financiado" if res.get("seguro1_fin") else "de contado")) if seguro else \
+        "por definir"
+    datos = [("PRECIO DE LISTA", money0(res["precio"])), ("BONO MG", money0(res["bono"]) if res["bono"] else "Sin bono"),
+             ("SEGURO AÑO 1", seg_txt), ("PLAZO", f"{plazo} meses")]
+    if res["gap"]:
+        datos.append(("GAP", f"{money0(res['gap'])} {res['gap_modo'].lower()}"))
+    chips = Table([[P(f"{a}<br/><font size=10 color='#18181B'><b>{b}</b></font>", st("chip", 6.8, TXT3, leading=12))
+                    for a, b in datos]], colWidths=[ancho / len(datos)] * len(datos))
+    chips.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), GRIS), ("LINEAFTER", (0, 0), (-2, -1), 2, BLANCO),
+                               ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                               ("LEFTPADDING", (0, 0), (-1, -1), 10)]))
+    story += [chips, Spacer(1, 12)]
+
+    # ---------------------------------------------------------------- mejor opción
     if ranking:
         _, op, ev = ranking[0]
-        story.append(P(f"LO QUE PAGA EL CLIENTE · MEJOR OPCIÓN: {op['nombre'].upper()}", st("r0", 9, ROJO, True)))
-        story.append(Spacer(1, 4))
-        datos = [("PAGO INICIAL", money(ev["pago_inicial"]), desglose(ev)),
-                 ("DESEMBOLSO DEL CLIENTE", money(ev["desembolso"]), desglose_desembolso(ev)),
-                 ("TASA", f"{ev['tasa']:.2f}%", f"{ev['tasa_iva']:.2f}% con IVA · comisión {op['cxa']:.0%}"),
-                 ("MENSUALIDAD", money(ev["mens"]),
-                  "meses 1-12" + (f" · meses 13+: {money(ev['mens2'])}" if ev["mens2"] else "")),
-                 ("PLAZO", f"{plazo} meses", f"financiado {money0(ev['financiado'])}")]
-        t = Table([[P(a, s_lbl) for a, _, _ in datos], [P(b, s_val) for _, b, _ in datos],
-                   [P(c, s_det) for _, _, c in datos]], colWidths=[ancho / 5] * 5)
-        t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), VERDE), ("LINEABOVE", (0, 0), (-1, 0), 3, VERDE_T),
-                               ("LINEAFTER", (0, 0), (-2, -1), 2, colors.white),
-                               ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 2), (-1, 2), 8)]))
-        story += [t, Spacer(1, 6)]
-        notas = [f"Plan {op['nombre']} (baremo {op['baremo']}), bono {ev['forma']}, financiado "
-                 f"{money(ev['financiado'])}, total de mensualidades {money(ev['total'])}."]
+        story += titulo("Mejor opción", f"{op['nombre']} · baremo {op['baremo']}")
+        mens2 = (ev["mens2"] if res.get("resto_fin") and ev["mens2"] and abs(ev["mens2"] - ev["mens"]) > 0.005
+                 else None)
+        izq = [P("MENSUALIDAD", st("ml", 7.5, colors.HexColor("#FECACA"), True)),
+               P(money(ev["mens"]), st("mv", 26, BLANCO, True, leading=30)),
+               P(("meses 1-12 · " + f"desde el mes 13: {money(mens2)}") if mens2 else f"fija los {plazo} meses",
+                 st("md", 7.5, colors.HexColor("#FEE2E2"))),
+               Spacer(1, 6),
+               P(f"Tasa {ev['tasa']:.2f}% ({ev['tasa_iva']:.2f}% con IVA) · comisión {op['cxa']:.0%}",
+                 st("mt", 8, BLANCO))]
+        bono_txt = {"al enganche": f"Bono {money0(res['bono'])} al enganche",
+                    "al precio": f"Bono {money0(res['bono'])} al precio", "a tasa": "Bono aplicado a la tasa"}
+        celdas = [("PAGO INICIAL", money(ev["pago_inicial"]), desglose(ev)),
+                  ("DESEMBOLSO DEL CLIENTE", money(ev["desembolso"]), desglose_desembolso(ev)),
+                  ("PRECIO DEL PLAN", money0(ev["precio_plan"]),
+                   texto_precio(ev) if ev["bono_precio"] else bono_txt.get(ev["forma"], "Sin bono")),
+                  ("ENGANCHE", f"{money0(ev['eng_total'])}  ({ev['pct']:.1%})",
+                   (f"cliente {money0(ev['eng_cliente'])} + bono {money0(ev['bono_eng'])}" if ev["bono_eng"] else
+                    f"sobre {money0(ev['base'])}")),
+                  ("MONTO FINANCIADO", money0(ev["financiado"]),
+                   f"monto total a financiar {money0(ev['monto_total'])}" if ev["monto_total"] - ev["financiado"] > 1
+                   else "sin seguros financiados"),
+                  ("TOTAL DE MENSUALIDADES", money(ev["total"]), f"{plazo} pagos")]
+        bloques = [[P(a, s_lbl), P(b, s_val), P(c, s_det)] for a, b, c in celdas]
+        der = Table([bloques[0:3], bloques[3:6]], colWidths=[ancho * 0.66 / 3] * 3)
+        der.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LINEBELOW", (0, 0), (-1, 0), 0.5, GRIS2),
+                                 ("LINEAFTER", (0, 0), (-2, -1), 0.5, GRIS2), ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                                 ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8)]))
+        tarjeta = Table([[izq, der]], colWidths=[ancho * 0.34, ancho * 0.66])
+        tarjeta.setStyle(TableStyle([("BACKGROUND", (0, 0), (0, 0), ROJO), ("BOX", (0, 0), (-1, -1), 0.6, GRIS2),
+                                     ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (0, 0), 16),
+                                     ("TOPPADDING", (0, 0), (0, 0), 12), ("BOTTOMPADDING", (0, 0), (0, 0), 12),
+                                     ("LEFTPADDING", (1, 0), (1, 0), 0), ("RIGHTPADDING", (1, 0), (1, 0), 0),
+                                     ("TOPPADDING", (1, 0), (1, 0), 0), ("BOTTOMPADDING", (1, 0), (1, 0), 0)]))
+        story += [KeepTogether([tarjeta]), Spacer(1, 5)]
         menor = min(ranking, key=lambda x: x[2]["mens"])
         if menor[1] is not op:
-            notas.append(f"Menor mensualidad: {menor[1]['nombre']} con {money(menor[2]['mens'])}, pero cuesta "
-                         f"{money(menor[0] - ranking[0][0])} más en total.")
+            story.append(P(f"La mensualidad más baja es la de {menor[1]['nombre']} ({money(menor[2]['mens'])}), pero "
+                           f"cuesta {money(menor[0] - ranking[0][0])} más en total.", s_small))
         if not seguro:
-            notas.append("Seguro en $0: supone que todo el desembolso es enganche. Revisa la sección del seguro.")
-        story += [P(" ".join(notas), s_small), Spacer(1, 12)]
+            story.append(P("Sin seguro capturado: todo el desembolso se toma como enganche.", s_small))
+        story.append(Spacer(1, 12))
     else:
-        story += [P(f"Ninguna oferta es válida a {plazo} meses con este desembolso.", s_h2), Spacer(1, 10)]
+        story += [P(f"Ninguna oferta es válida a {plazo} meses con este desembolso.", st("nv", 12, ROJO, True)),
+                  Spacer(1, 10)]
 
-    story.append(P(f"Comparativo de ofertas a {plazo} meses", s_h2))
-    story.append(P("Con el mismo desembolso del cliente en todas: el enganche se ajusta a lo que queda después del "
-                   "seguro y la comisión (más el bono si va al enganche). Pago inicial = enganche + comisión + seguro "
-                   "año 1 + GAP contado. Ordenadas por el total de mensualidades.", s_small))
-    story.append(Spacer(1, 5))
-    cab = ["#", "Oferta", "Bono", "Eng. cliente", "Eng. total", "Com.", "Pago inicial", "Tasa / c IVA",
-           "Financ.", "Mens. 1-12", "Mens. 13+", "Total mens.", "Seguro permitido"]
-    nom = lambda o, est: P(f"{o['nombre']}<br/><font size=6.5 color='#5A5A5A'>Baremo {o['baremo']}</font>", est)
+    # ---------------------------------------------------------------- comparativo
+    con13 = res.get("resto_fin") and any(e["mens2"] and abs(e["mens2"] - e["mens"]) > 0.005 for _, _, e in ranking)
+    bloque = titulo(f"Comparativo de planes a {plazo} meses",
+                    "mismo desembolso del cliente en todos · ordenados por total de mensualidades")
+    cab = ["#", "Plan", "Precio del plan", "Enganche", "Pago inicial", "Desembolso", "Tasa", "Mensualidad"] + \
+        (["Desde mes 13"] if con13 else []) + ["Total mensualidades"]
     filas = [[P(h, s_head) for h in cab]]
     for i, (tot, o, e) in enumerate(ranking, 1):
-        b = s_cell_b if i == 1 else s_cell_c
-        filas.append([P(i, s_cell_c), nom(o, s_cell_b if i == 1 else s_cell), P(e["forma"], s_cell_c),
-                      P(f"{money0(e['eng_cliente'])}<br/>{e['pct_cliente']:.1%}", b),
-                      P(f"{money0(e['eng_total'])}<br/>{e['pct']:.1%}", s_cell_c),
-                      P(money(e["cxa"]), s_cell_c), P(money0(e["pago_inicial"]), s_cell_c),
-                      P(f"{e['tasa']:.2f}% / {e['tasa_iva']:.2f}%", s_cell_c),
-                      P(money0(e["financiado"]), s_cell_c), P(money(e["mens"]), b), P(money(e["mens2"]), s_cell_c),
-                      P(money(tot), s_cell_c), P(texto_rango(res["rangos"][o["nombre"]]), s_cell_c)])
-    malas = [o for o in res["ops"] if not (res["evals"][o["nombre"]] and res["evals"][o["nombre"]]["valida"])]
-    for o in malas:
-        e = res["evals"][o["nombre"]]
-        filas.append([P("—", s_cell_c), nom(o, s_gris), P("", s_cell),
-                      P(e["motivo"] if e else "No maneja este plazo", st("m", 7.5, TXT2, align=TA_CENTER))]
-                     + [P("")] * 8 + [P(texto_rango(res["rangos"][o["nombre"]]), s_cell_c)])
-    cw = [0.025, 0.16, 0.075, 0.07, 0.07, 0.06, 0.075, 0.08, 0.065, 0.07, 0.07, 0.085, 0.095]
-    tr = Table(filas, colWidths=[ancho * x for x in cw], repeatRows=1)
-    est = [("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-           ("LINEBELOW", (0, 1), (-1, -1), 0.4, GRIS2), ("TOPPADDING", (0, 0), (-1, -1), 4),
-           ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]
+        b = i == 1
+        precio_c = (f"{money0(e['precio_plan'])}<br/>{gris('lista − bono ' + money0(e['bono_precio']))}"
+                    if e["bono_precio"] else money0(e["precio_plan"]))
+        eng_c = f"{money0(e['eng_total'])} · {e['pct']:.1%}" + (
+            f"<br/>{gris('cliente ' + money0(e['eng_cliente']) + ' + bono')}" if e["bono_eng"] else "")
+        fila = [P(i, s_ccb if b else s_cc),
+                P(f"{o['nombre']}<br/>{gris('baremo ' + o['baremo'] + ' · bono ' + e['forma'])}", s_cb if b else s_c),
+                P(precio_c, s_cr), P(eng_c, s_cr), P(money0(e["pago_inicial"]), s_cr), P(money0(e["desembolso"]), s_cr),
+                P(f"{e['tasa']:.2f}%", s_cc), P(money(e["mens"]), s_crb if b else s_cr)]
+        if con13:
+            fila.append(P(money(e["mens2"]), s_cr))
+        fila.append(P(money(tot), s_cr))
+        filas.append(fila)
+    cw = ([0.03, 0.25, 0.1, 0.12, 0.085, 0.085, 0.06, 0.085, 0.085, 0.1] if con13 else
+          [0.03, 0.28, 0.115, 0.13, 0.09, 0.09, 0.06, 0.1, 0.105])
+    s = sum(cw); cw = [x / s for x in cw]
+    extra = [("BACKGROUND", (0, 1), (-1, 1), VERDE), ("LINEBEFORE", (0, 1), (0, 1), 3, VERDE_T)] if ranking else []
     if ranking:
-        est.append(("BACKGROUND", (0, 1), (-1, 1), VERDE))
-    for k in range(len(malas)):
-        r = len(ranking) + 1 + k
-        est += [("BACKGROUND", (0, r), (-1, r), GRIS), ("SPAN", (3, r), (11, r))]
-    tr.setStyle(TableStyle(est))
-    story += [tr, Spacer(1, 8),
-              P("Mensualidad = pago fijo del capital + seguro de vida (4.1% del capital repartido en el plazo; con "
-                "seguro financiado, 4.09% de capital + seguros). Desde el mes 13 "
-                "se suma el seguro de cada año financiado a 12 meses (aproximado al centavo). Comisión por apertura "
-                "= % + IVA sobre el monto total a financiar. Enganche menor a 20%: +4% a la tasa; máximo 75%. "
-                "No incluye Anualidades, University ni Seminuevos.", s_small)]
+        bloque.append(tabla(filas, cw, extra))
+        story += bloque
+    malas = [(o, res["evals"][o["nombre"]]) for o in res["ops"]
+             if not (res["evals"][o["nombre"]] and res["evals"][o["nombre"]]["valida"])]
+    if malas:
+        items = [P(f"<b>{o['nombre']}</b> — {e['motivo'] if e else 'no maneja este plazo'}", s_small)
+                 for o, e in malas]
+        mitad = (len(items) + 1) // 2
+        cols = [items[:mitad], items[mitad:] or [P("", s_small)]]
+        tm = Table([[P("NO APLICAN CON ESTE DESEMBOLSO", st("na", 7, TXT3, True)), ""], [cols[0], cols[1]]],
+                   colWidths=[ancho / 2] * 2)
+        tm.setStyle(TableStyle([("SPAN", (0, 0), (1, 0)), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                ("BACKGROUND", (0, 0), (-1, -1), GRIS), ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                                ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+        story += [Spacer(1, 6), tm]
 
-    # --- Oferta del boletín para el auto
-    story.append(PageBreak())
-    story.append(P("Oferta del boletín para este auto", s_h2))
-    story.append(P(res["descripcion"], s_p))
-    story.append(Spacer(1, 6))
-    cab_o = ["Oferta", "Tasas por plazo", "Com.", "Bono", "Eng. mínimo sistema",
-             "Eng. mínimo real del cliente", f"Desembolso mínimo ({plazo} m)", f"Pago inicial mínimo ({plazo} m)"]
-    filas_o = [[P(h, s_head) for h in cab_o]]
-    for q in res["requisitos"]:
-        sis = f"{q['min_sistema']:.0%}" + (f" a &lt;{q['min_max']:.0%}" if q["min_max"] else "")
-        otro = "" if q["plazo_pago_min"] == plazo else f" ({q['plazo_pago_min']} m)"
-        filas_o.append([P(f"{q['oferta']}<br/><font size=6.5 color='#5A5A5A'>Baremo {q['baremo']}</font>"),
-                        P(q["tasas"], st("tz", 7.5, NEGRO, leading=9.5)), P(f"{q['cxa']:.0%}", s_cell_c),
-                        P(q["bono"], s_cell_c), P(sis, s_cell_c),
-                        P(f"<b>{q['min_cliente']:.2%}</b><br/>{money0(q['min_cliente_monto'])}", s_cell_c),
-                        P(money0(q["desembolso_min"]) + otro, s_cell_c),
-                        P(money0(q["pago_inicial_min"]) + otro, s_cell_c)])
-    to = Table(filas_o, colWidths=[ancho * x for x in (0.2, 0.22, 0.06, 0.1, 0.08, 0.11, 0.115, 0.115)],
-               repeatRows=1)
-    to.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                            ("LINEBELOW", (0, 1), (-1, -1), 0.4, GRIS2), ("TOPPADDING", (0, 0), (-1, -1), 4),
-                            ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]))
-    story += [to, Spacer(1, 4),
-              P("Eng. mínimo real del cliente: lo que el cliente pone de su bolsa. Con bono al enganche = enganche "
-                "sistema − % del bono (exacto; el boletín lo redondea); en Tasa Baja el bono va a la tasa y el cliente pone todo el "
-                "enganche. Desembolso mínimo = enganche propio + seguro año 1 + GAP contado + comisión; pago inicial "
-                "mínimo = desembolso + bono al enganche (como lo muestra la cotización).", s_small),
-              Spacer(1, 14)]
+    story += [Spacer(1, 8),
+              P("<b>Cómo leerlo.</b> Pago inicial = enganche + comisión por apertura + seguro de contado del año 1 "
+                "(como en la cotización). Desembolso = lo que pone el cliente de su bolsa (pago inicial − bono al "
+                "enganche). Con el bono al precio, el auto queda en precio de lista − bono y el enganche se calcula "
+                "sobre ese precio. Mensualidad = pago fijo del capital + seguro de vida (y del seguro financiado, si "
+                "aplica). Enganche menor a 20%: +4% a la tasa; máximo 75%. No incluye Anualidades, University ni "
+                "Seminuevos.", s_small)]
 
-    # --- Seguro
-    tramos = res["tramos"]
-    story.append(P("¿Cuánto puede valer el seguro del primer año?", s_h2))
-    story.append(P(f"El seguro se paga de contado con "
-                   + (f"el pago inicial ({money0(res['pago_inicial'])})" if res["pago_inicial"] else
-                      f"el desembolso del cliente ({money0(pago)})") + ": entre más cuesta, menos "
-                   f"enganche queda. Mejor oferta a {plazo} meses según el costo del seguro"
-                   + ("" if not res.get("resto_fin", True) or
-                      (res["seguro_anual_estimado"] is False and res["seguro_anual"]) else
-                      " (el seguro anual del resto del plazo se toma igual al del primer año)") + ".", s_p))
-    story.append(Spacer(1, 8))
-    validos = [t for t in tramos if t["oferta"]]
-    if validos:
-        tope = min(res["tope_seguro"], max(t["hasta"] for t in validos) * 1.08 + 1)
-        nombres = list(dict.fromkeys(t["oferta"] for t in validos))
-        color_de = {n: PALETA[i % len(PALETA)] for i, n in enumerate(nombres)}
-        d = Drawing(ancho, 52)
-        esc = ancho / tope
-        for t in tramos:
-            if t["desde"] > tope:
-                break
-            x0, x1 = t["desde"] * esc, min(t["hasta"] + 10, tope) * esc
-            d.add(Rect(x0, 18, max(x1 - x0, 0.8), 26, fillColor=color_de.get(t["oferta"], GRIS2),
-                       strokeColor=colors.white, strokeWidth=0.6))
-            if t["oferta"] and x1 - x0 > 50:
-                d.add(String((x0 + x1) / 2, 28, money0(t["hasta"]), fontName="Helvetica-Bold", fontSize=7.5,
-                             fillColor=colors.white, textAnchor="middle"))
-        d.add(String(0, 4, "$0", fontName="Helvetica", fontSize=7, fillColor=TXT2))
-        d.add(String(ancho, 4, money0(tope), fontName="Helvetica", fontSize=7, fillColor=TXT2, textAnchor="end"))
-        if seguro and seguro <= tope:
-            xs = seguro * esc
-            d.add(Rect(xs - 1, 14, 2, 34, fillColor=NEGRO, strokeColor=None))
-            d.add(String(xs, 2, f"Tu seguro {money0(seguro)}", fontName="Helvetica-Bold", fontSize=7,
-                         fillColor=NEGRO, textAnchor="middle"))
-        story += [d, Spacer(1, 8)]
-    else:
-        color_de = {}
-    filas_t = [[P(h, s_head) for h in ["", "Seguro primer año", "Mejor oferta", f"Mensualidad a {plazo} m (1-12)"]]]
-    sw = []
-    for i, t in enumerate(tramos, 1):
-        filas_t.append([P(""), P(f"{money0(t['desde'])} a {money0(t['hasta'])}", s_cell_c),
-                        P(t["oferta"] or "Ninguna válida (enganche insuficiente)", s_cell_b if t["oferta"] else s_gris),
-                        P(texto_mens(t), s_cell_c)])
-        sw.append(("BACKGROUND", (0, i), (0, i), color_de.get(t["oferta"], GRIS2)))
-        if seguro and t["desde"] <= seguro <= t["hasta"]:
-            sw.append(("BACKGROUND", (1, i), (-1, i), VERDE))
-    tt = Table(filas_t, colWidths=[ancho * x for x in (0.02, 0.2, 0.5, 0.28)])
-    tt.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                            ("LINEBELOW", (0, 1), (-1, -1), 0.4, GRIS2), ("TOPPADDING", (0, 0), (-1, -1), 5),
-                            ("BOTTOMPADDING", (0, 0), (-1, -1), 5)] + sw))
-    story += [tt, Spacer(1, 14)]
-
-    # --- Matriz por plazo
-    bloque = [P("Mensualidad (meses 1-12) por oferta y plazo", s_h2),
-              P("Con el enganche que resulta del desembolso del cliente en cada plazo. En verde, la mejor de cada plazo.",
-                s_small), Spacer(1, 5)]
-    filas_x = [[P(h, s_head) for h in ["Oferta", "Eng. mín"] + [f"{n} m" for n in PLAZOS]]]
-    est_x = [("BACKGROUND", (0, 0), (-1, 0), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-             ("LINEBELOW", (0, 1), (-1, -1), 0.4, GRIS2), ("TOPPADDING", (0, 0), (-1, -1), 4),
-             ("BOTTOMPADDING", (0, 0), (-1, -1), 4)]
-    for r, o in enumerate(res["ops"], 1):
-        fila = [P(o["nombre"]), P(f"{o['min']:.0%}", s_cell_c)]
+    # ---------------------------------------------------------------- mensualidades por plazo
+    con_opcion = [o for o in res["ops"] if any(e and e["valida"] for e in res["matriz"][o["nombre"]].values())]
+    if con_opcion:
+        story += [CondPageBreak(220), Spacer(1, 14)]
+    bloque = titulo("Mensualidad por plazo", "meses 1-12 con el mismo desembolso · en verde, la mejor de cada plazo")
+    filas_x = [[P(h, s_head) for h in ["Plan", "Precio del plan"] + [f"{n} meses" for n in PLAZOS]]]
+    est_x = []
+    for r, o in enumerate(con_opcion, 1):
+        e0 = next((x for x in res["matriz"][o["nombre"]].values() if x), None)
+        precio_c = money0(e0["precio_plan"]) if e0 else "—"
+        fila = [P(f"{o['nombre']}<br/>{gris('baremo ' + o['baremo'])}"), P(precio_c, s_cr)]
         for j, n in enumerate(PLAZOS):
             e = res["matriz"][o["nombre"]][n]
             if not e or not e["valida"]:
-                fila.append(P("—", s_cell_c))
+                fila.append(P("—", st("gx", 8, TXT3, align=TA_CENTER)))
                 continue
-            fila.append(P(f"<b>{money(e['mens'])}</b><br/><font size=6.5 color='#5A5A5A'>{e['tasa']:.2f}%</font>",
-                          s_cell_c))
+            tasa_txt = gris(f"{e['tasa']:.2f}%")
+            fila.append(P(f"<b>{money(e['mens'])}</b><br/>{tasa_txt}", s_cc))
             m = res["mejores"][n]
             if m and m[0]["nombre"] == o["nombre"]:
                 est_x.append(("BACKGROUND", (2 + j, r), (2 + j, r), VERDE))
         filas_x.append(fila)
-    tx = Table(filas_x, colWidths=[ancho * 0.3, ancho * 0.07] + [ancho * 0.63 / 6] * 6, repeatRows=1)
-    tx.setStyle(TableStyle(est_x))
-    bloque.append(tx)
+    bloque.append(tabla(filas_x, [0.28, 0.1] + [0.62 / 6] * 6, est_x))
+    sin = len(res["ops"]) - len(con_opcion)
+    if sin:
+        bloque += [Spacer(1, 3), P(f"{sin} plan(es) sin opción en ningún plazo con este desembolso (ver requisitos).",
+                                   s_small)]
+    bloque.append(Spacer(1, 2))
+    if con_opcion:
+        story.append(KeepTogether(bloque))
+
+    # ---------------------------------------------------------------- oferta del auto
+    story += [Spacer(1, 14)]
+    bloque = titulo("Requisitos de la oferta para este auto", f"mínimos a {plazo} meses con el seguro capturado")
+    v = CATALOGO[res["vehiculo"]]
+    if v["color"]:
+        resumen = (f"Color <b>{COLORES[v['color']]}</b> en la tabla de bonos (enganche sistema {v['color']}%) · bono MG "
+                   f"<b>{money0(res['bono'])}</b> ({res['bono'] / res['precio']:.1%} del precio). El bono va a la tasa "
+                   f"(Tasa Baja), al enganche (el cliente aporta desde {v['color'] / 100 - res['bono'] / res['precio']:.2%}) "
+                   f"o al precio (el auto queda en {money0(res['precio'] - res['bono'])}).")
+    else:
+        resumen = res["descripcion"]
+    bloque += [P(resumen, s_p), Spacer(1, 6)]
+    cab_o = ["Plan", "Precio del plan", "Tasas por plazo", "Com.", "Enganche mínimo (sistema)",
+             "Enganche mínimo del cliente", "Desembolso mínimo", "Pago inicial mínimo"]
+    filas_o = [[P(h, s_head) for h in cab_o]]
+    for q in res["requisitos"]:
+        sis = f"{q['min_sistema']:.0%}" + (f" a &lt;{q['min_max']:.0%}" if q["min_max"] else "")
+        otro = "" if q["plazo_pago_min"] == plazo else "<br/>" + gris(f"a {q['plazo_pago_min']} m")
+        precio_c = (f"{money0(q['precio_plan'])}<br/>{gris('lista − bono ' + money0(q['bono_precio']))}"
+                    if q["bono_precio"] else money0(q["precio_plan"]))
+        corto = q["oferta"].replace(" (bono al enganche)", "").replace(" (bono al precio)", "")
+        filas_o.append([P(f"{corto}<br/>{gris('baremo ' + q['baremo'] + ' · bono ' + q['bono'])}"),
+                        P(precio_c, s_cr), P(q["tasas"], st("tz", 7.3, TXT2, leading=9.2)),
+                        P(f"{q['cxa']:.0%}", s_cc), P(sis, s_cc),
+                        P(f"<b>{q['min_cliente']:.2%}</b> · {money0(q['min_cliente_monto'])}", s_cc),
+                        P(money0(q["desembolso_min"]) + otro, s_cr), P(money0(q["pago_inicial_min"]) + otro, s_cr)])
+    bloque.append(tabla(filas_o, [0.25, 0.1, 0.21, 0.045, 0.08, 0.12, 0.1, 0.095], pad=3.5))
     story.append(KeepTogether(bloque))
     doc.build(story)
     return archivo.getvalue()
