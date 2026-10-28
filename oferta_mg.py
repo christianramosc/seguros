@@ -586,7 +586,7 @@ def pdf_bytes(res, cliente=""):
            + (f" · seguro anual resto del plazo {money(res['seguro_anual'])}"
               + (" (estimado)" if res["seguro_anual_estimado"] else "")
               + (" financiado" if res.get("resto_fin", True) else " de contado cada año")
-              if res["seguro_anual"] else "")
+              if res["seguro_anual"] and res.get("resto_fin", True) else "")
            + f" · generado el {datetime.now():%d/%m/%Y}")
     if cliente.strip():
         sub = f"Cliente: <b>{cliente.strip()}</b> · " + sub
@@ -699,7 +699,8 @@ def pdf_bytes(res, cliente=""):
                    + (f"el pago inicial ({money0(res['pago_inicial'])})" if res["pago_inicial"] else
                       f"el desembolso del cliente ({money0(pago)})") + ": entre más cuesta, menos "
                    f"enganche queda. Mejor oferta a {plazo} meses según el costo del seguro"
-                   + ("" if res["seguro_anual_estimado"] is False and res["seguro_anual"] else
+                   + ("" if not res.get("resto_fin", True) or
+                      (res["seguro_anual_estimado"] is False and res["seguro_anual"]) else
                       " (el seguro anual del resto del plazo se toma igual al del primer año)") + ".", s_p))
     story.append(Spacer(1, 8))
     validos = [t for t in tramos if t["oferta"]]

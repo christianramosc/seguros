@@ -81,12 +81,16 @@ color de la tabla de bonos − % del bono, exacto (la columna del boletín lo re
 cotizador acepta el mínimo exacto); en Tasa Baja el
 bono va a la tasa y el cliente pone todo el enganche.
 
-Debajo de la mejor opción, **una sola tabla con todos los planes** al plazo elegido: pago inicial, desembolso,
-enganche, mensualidad, tasa, total, **hasta cuánto puede valer la póliza** y, si no aplica, por qué. Pestañas: **Por
-plazo** (mensualidades de 12 a 72 meses con lo capturado) y **Mínimos y oferta del auto** (enganche mínimo del sistema
-y del cliente, desembolso y pago inicial mínimos y mensualidad con el enganche mínimo de 12 meses al plazo máximo;
-descripción de la oferta y botón **PDF de mínimos de toda la oferta**). GAP, cliente e IVA van en «Más opciones».
-Botón **PDF del análisis**.
+**Diseño:** tema oscuro estilo shadcn/ui (paleta zinc, fuente Inter) en `.streamlit/config.toml`; las piezas
+propias (encabezado, tarjetas, insignias, títulos de sección) están en `ui.py`. Orden de la página: datos de la
+operación → **Mejor opción** (tarjetas) → **Planes del boletín** (una tabla con todos los planes al plazo elegido:
+mensualidad, tasa, pago inicial, desembolso, enganche, total, **hasta cuánto puede valer la póliza** y, si no aplica,
+por qué) → **Detalle** (pestañas Por plazo · Mínimos por plan · Oferta del auto) → **Descargas** (PDF del análisis con
+el nombre del cliente y PDF de mínimos de toda la oferta).
+
+**Desactivados por ahora** (`pag_oferta.py`): `MOSTRAR_GAP = False` hasta tener los precios de GAP actualizados y
+`MOSTRAR_SEGURO_2 = False` (el seguro de los años 2+ no se muestra ni entra a la mensualidad). Cámbialos a `True` para
+volver a mostrarlos.
 
 **PDF de mínimos de toda la oferta**: todos los autos y planes del boletín con el enganche mínimo del sistema y real
 del cliente, comisión, desembolso y pago inicial mínimos (+ seguro de contado) y la mensualidad con el enganche mínimo

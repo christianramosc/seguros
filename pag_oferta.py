@@ -3,11 +3,14 @@
 Página «Mejor oferta MG»: eliges el auto y capturas el desembolso del cliente o el pago inicial; compara todas las
 ofertas del boletín de MG Financial Services con el método del cotizador de Autoexpress (cálculo en oferta_mg.py).
 
-Pago inicial (como en la cotización) = enganche + comisión por apertura + seguro contado año 1 + GAP contado; el
-enganche incluye el bono cuando va al enganche. Desembolso del cliente = pago inicial − bono al enganche.
+Pago inicial (como en la cotización) = enganche + comisión por apertura + seguro contado año 1; el enganche incluye
+el bono cuando va al enganche. Desembolso del cliente = pago inicial − bono al enganche.
 
-Orden de la página: datos → mejor opción (tarjetas) → una tabla con todos los planes (incluye hasta cuánto puede
-valer la póliza y por qué no aplica un plan) → pestañas «Por plazo» y «Mínimos» → PDF.
+Orden de la página: datos de la operación → mejor opción (tarjetas) → tabla con todos los planes → pestañas «Por
+plazo», «Mínimos por plan» y «Oferta del auto» → descargas (PDF del análisis y PDF de mínimos).
+
+Por ahora sin GAP (faltan los precios actualizados) ni seguro de los años 2+: se activan con MOSTRAR_GAP y
+MOSTRAR_SEGURO_2.
 """
 import importlib
 import os
@@ -17,7 +20,7 @@ import pandas as pd
 import streamlit as st
 
 import oferta_mg as om
-from ui import hero, tarjeta
+from ui import APAGADO, RESALTE, VERDE_T, hero, insignias, nota, seccion, tarjeta
 
 # Streamlit Cloud conserva los módulos importados entre despliegues: si oferta_mg.py cambió (boletín nuevo, ajustes),
 # se recarga para no usar la versión anterior.
@@ -26,8 +29,9 @@ if getattr(om, "_mtime", None) != _mtime:
     om = importlib.reload(om)
     om._mtime = _mtime
 
-VERDE = "background-color: #E6F4EA; font-weight: 600"
-GRIS = "color: #8A94A6"
+MOSTRAR_GAP = False        # desactivado hasta tener los precios de GAP actualizados
+MOSTRAR_SEGURO_2 = False   # seguro de los años 2+ oculto: la mensualidad no lo incluye
+
 D = lambda t: str(t).replace("$", "\\$")   # en markdown, «$» abre fórmulas
 DOLAR = lambda t, **k: st.column_config.NumberColumn(t, format="dollar", **k)
 TEXTO_L = lambda t: st.column_config.TextColumn(t, width="large")
@@ -40,61 +44,56 @@ autos = list(om.CATALOGO)
 CAPTURAS = ("Desembolso", "Pago inicial")
 st.session_state.setdefault("of_pago", 130000)
 st.session_state.setdefault("of_pi", 0)
+seguro_anual, resto_fin, gap_modo, gap_monto = 0.0, False, "No", 0.0
 with st.container(border=True):
-    c1, c2, c3, c4 = st.columns([3, 2, 2, 2])
-    veh = c1.selectbox("Auto", autos, index=autos.index("MG5 2027 1.5L COM EXCITE AT"), key="of_veh")
+    a1, a2 = st.columns([3, 1], vertical_alignment="bottom")
+    veh = a1.selectbox("Auto", autos, index=autos.index("MG5 2027 1.5L COM EXCITE AT"), key="of_veh")
     v = om.CATALOGO[veh]
-    captura = c2.segmented_control("Capturo", CAPTURAS, default="Desembolso", key="of_captura",
+    precio_manual = a2.number_input("Precio", min_value=0, value=0, step=1000, key="of_precio",
+                                    help="0 = precio de lista. Obligatorio en Lanzamiento y «Otro».")
+    if v["msrp"]:
+        insignias([f"Lista {om.money0(v['msrp'])}", f"Bono {om.money0(v['bono'])}" if v["bono"] else "Sin bono",
+                   f"Sistema {v['color']}% · {om.COLORES[v['color']]}" if v["color"] else ""])
+    else:
+        insignias(["Sin precio en el boletín: captúralo en «Precio»"])
+
+    b1, b2, b3, b4 = st.columns([1.3, 1, 1, 1.6], vertical_alignment="bottom")
+    captura = b1.segmented_control("Capturo", CAPTURAS, default="Desembolso", key="of_captura",
                                    help="El otro campo se calcula y queda bloqueado.") or "Desembolso"
     # el campo que no se captura se calcula: pago inicial = desembolso + bono al enganche (en Tasa Baja son iguales)
     if captura == "Pago inicial":
         st.session_state["of_pago"] = max(st.session_state["of_pi"] - v["bono"], 0)
     else:
         st.session_state["of_pi"] = st.session_state["of_pago"] + v["bono"]
-    pago = c3.number_input("Desembolso del cliente", min_value=0, step=5000, key="of_pago",
+    pago = b2.number_input("Desembolso del cliente", min_value=0, step=5000, key="of_pago",
                            disabled=captura != "Desembolso",
-                           help="Lo que pone de su bolsa: enganche propio + comisión + seguro año 1 + GAP contado.")
-    pago_inicial = c4.number_input("Pago inicial", min_value=0, step=5000, key="of_pi",
+                           help="Lo que pone de su bolsa: enganche propio + comisión + seguro año 1.")
+    pago_inicial = b3.number_input("Pago inicial", min_value=0, step=5000, key="of_pi",
                                    disabled=captura != "Pago inicial",
                                    help="Como en la cotización: desembolso + bono al enganche (en Tasa Baja son "
                                         "iguales).")
-    c5, c6, c7, c8 = st.columns([3, 2, 2, 2])
-    plazo = c5.segmented_control("Plazo", om.PLAZOS, default=60, key="of_plazo",
+    plazo = b4.segmented_control("Plazo", om.PLAZOS, default=60, key="of_plazo",
                                  format_func=lambda n: f"{n} m") or 60
-    seguro1 = c6.number_input("Seguro año 1", min_value=0.0, value=0.0, step=500.0, key="of_seg",
-                              help="Importe primer año. Déjalo en 0 si aún no lo tienes: la tabla dice hasta cuánto "
-                                   "puede valer. Contado o financiado se elige abajo.")
-    seguro_anual = c7.number_input("Seguro anual (años 2+)", min_value=0.0, value=0.0, step=500.0,
-                                   key="of_seg_anual", help="Importe anual resto del plazo. En 0 = igual al año 1.")
-    precio_manual = c8.number_input("Precio", min_value=0, value=0, step=1000, key="of_precio",
-                                    help="0 = precio de lista. Obligatorio en Lanzamiento y «Otro».")
-    if v["msrp"]:
-        c1.caption(D(f"Lista {om.money0(v['msrp'])} · bono {om.money0(v['bono'])}"
-                     + (f" · sistema {v['color']}% ({om.COLORES[v['color']]})" if v["color"] else "")))
-    else:
-        c1.caption("Sin precio en el boletín: captúralo en «Precio».")
-    s1, s2, s3, s4 = st.columns([2, 2, 2, 1.4])
-    seguro1_fin = (s1.segmented_control("Seguro año 1", ["Contado", "Financiado"], default="Contado",
+
+    c1, c2, c3 = st.columns([1, 1.3, 1.7], vertical_alignment="bottom")
+    seguro1 = c1.number_input("Seguro año 1", min_value=0.0, value=0.0, step=500.0, key="of_seg",
+                              help="Importe primer año. En 0 si aún no lo tienes: la tabla dice hasta cuánto puede "
+                                   "valer.")
+    seguro1_fin = (c2.segmented_control("Pago del seguro", ["Contado", "Financiado"], default="Contado",
                                         key="of_seg1_modo",
-                                        help="Contado: va en el pago inicial. Financiado (Autoexpress Multianual "
-                                             "Fraccionado): el importe anual se financia también el año 1 —se "
-                                             "amortiza en los meses 1-12 y paga comisión— y el «Seguro año 1» "
-                                             "no se usa (en la cotización sale en $0).")
+                                        help="Contado: va en el pago inicial. Financiado (multianual fraccionado): "
+                                             "se amortiza en los meses 1-12 y paga comisión.")
                    or "Contado") == "Financiado"
-    resto_fin = (s2.segmented_control("Seguro años 2+", ["Financiado", "Contado"], default="Financiado",
-                                      key="of_seg2_modo",
-                                      help="Financiado: cada año se suma a 12 meses desde el mes 13 (fraccionado). "
-                                           "Contado: el cliente lo paga cada aniversario y la mensualidad no sube.")
-                 or "Financiado") == "Financiado"
-    gap_modo = s3.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap",
-                                    help="Contado: va en el pago inicial. Financiado: se suma al precio, entra al "
-                                         "enganche % y al crédito. Captura el monto de la cotización.") or "No"
-    gap_monto = s4.number_input("Monto GAP", min_value=0.0, value=0.0, step=100.0, key="of_gap_monto",
-                                disabled=gap_modo == "No", help="El GAP de la cotización (depende del auto).")
-    with st.expander("Más opciones"):
-        e2, e3 = st.columns([3, 2])
-        cliente = e2.text_input("Cliente (para el PDF)", key="of_cli")
-        iva = e3.toggle("IVA sobre intereses", value=True, key="of_iva")
+    if MOSTRAR_SEGURO_2:
+        seguro_anual = c3.number_input("Seguro anual (años 2+)", min_value=0.0, value=0.0, step=500.0,
+                                       key="of_seg_anual", help="En 0 = igual al año 1.")
+        resto_fin = (c3.segmented_control("Seguro años 2+", ["Financiado", "Contado"], default="Financiado",
+                                          key="of_seg2_modo") or "Financiado") == "Financiado"
+    if MOSTRAR_GAP:
+        gap_modo = c3.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap") or "No"
+        gap_monto = c3.number_input("Monto GAP", min_value=0.0, value=0.0, step=100.0, key="of_gap_monto",
+                                    disabled=gap_modo == "No")
+    iva = c3.toggle("IVA sobre intereses", value=True, key="of_iva")
 
 if om.requiere_precio(veh) and not precio_manual:
     st.markdown('<div class="vacio"><b>Captura el precio del auto</b><br>'
@@ -125,50 +124,40 @@ args = (veh, float(pago), float(seguro1), float(seguro_anual), int(plazo), float
         float(gap_monto) if gap_modo != "No" else 0.0)
 res = correr(*args)
 ranking = res["ranking"]
-if gap_modo != "No" and not res["gap"]:
-    st.warning("Captura el monto de GAP de la cotización: sin él se calcula sin GAP.")
-elif res["gap"]:
-    st.caption(D(f":material/shield_with_heart: GAP {gap_modo.lower()} de {om.money(res['gap'])}"
-                 + (" (va en el pago inicial)." if gap_modo == "Contado" else
-                    " (se suma al precio: entra al enganche % y al crédito).")))
 
 # ----------------------------------------------------------------------------- mejor opción
 if ranking:
     _, op, ev = ranking[0]
-    st.markdown(f"##### :material/emoji_events: Mejor opción: **{op['nombre']}**")
+    seccion("Mejor opción", f"{op['nombre']} · baremo {op['baremo']} · bono {ev['forma']}")
     k = st.columns(5)
-    tarjeta(k[0], "receipt_long", "Pago inicial", om.money(ev["pago_inicial"]), om.desglose(ev))
-    tarjeta(k[1], "account_balance_wallet", "Desembolso", om.money(ev["desembolso"]), om.desglose_desembolso(ev))
-    tarjeta(k[2], "payments", "Mensualidad", om.money(ev["mens"]),
-            "Meses 1-12" + (f" · 13+: {om.money(ev['mens2'])}" if ev["mens2"] else ""), "#1E7B34")
-    tarjeta(k[3], "percent", "Tasa", f"{ev['tasa']:.2f}%", f"{ev['tasa_iva']:.2f}% con IVA · com. {op['cxa']:.0%}")
-    tarjeta(k[4], "event", "Plazo", f"{plazo} meses", f"Financiado {om.money0(ev['financiado'])}")
-    nota = f"Baremo {op['baremo']} · bono {ev['forma']} · total de mensualidades {om.money(ev['total'])}"
+    tarjeta(k[0], "", "Mensualidad", om.money(ev["mens"]),
+            "Meses 1-12" + (f" · 13+: {om.money(ev['mens2'])}" if ev["mens2"] and MOSTRAR_SEGURO_2 else ""),
+            VERDE_T)
+    tarjeta(k[1], "", "Pago inicial", om.money(ev["pago_inicial"]), om.desglose(ev))
+    tarjeta(k[2], "", "Desembolso", om.money(ev["desembolso"]), om.desglose_desembolso(ev))
+    tarjeta(k[3], "", "Tasa", f"{ev['tasa']:.2f}%", f"{ev['tasa_iva']:.2f}% con IVA · com. {op['cxa']:.0%}")
+    tarjeta(k[4], "", "Plazo", f"{plazo} meses", f"Financiado {om.money0(ev['financiado'])}")
+    notas = [f"Total de mensualidades {om.money(ev['total'])}."]
     menor = min(ranking, key=lambda x: x[2]["mens"])
     if menor[1] is not op:
-        nota += (f" · menor mensualidad: {menor[1]['nombre']} ({om.money(menor[2]['mens'])}), "
-                 f"{om.money(menor[0] - ranking[0][0])} más en total")
-    st.caption(D(nota))
+        notas.append(f"Menor mensualidad: {menor[1]['nombre']} ({om.money(menor[2]['mens'])}), "
+                     f"{om.money(menor[0] - ranking[0][0])} más en total.")
+    if not seguro1:
+        notas.append("Seguro en $0: todo va a enganche; la columna «Póliza año 1» dice hasta cuánto puede valer.")
+    if seguro1_fin:
+        notas.append("Seguro financiado: no va en el pago inicial y paga comisión.")
+    for t in notas:
+        nota(t)
 else:
     st.warning(f"Ninguna oferta es válida a {plazo} meses con este {captura.lower()}.")
-if not seguro1:
-    st.caption(":material/warning: Seguro en \\$0: todo va a enganche. La columna «Póliza año 1» dice hasta cuánto "
-               "puede valer.")
-if seguro1_fin:
-    st.caption(":material/info: Seguro multianual fraccionado: el importe anual se financia también el año 1 "
-               "(no va en el pago inicial, paga comisión) y la mensualidad queda igual todo el plazo. Captura el "
-               "importe anual en «Seguro anual (años 2+)».")
-if not resto_fin:
-    st.caption(D(":material/info: Seguro de los años 2+ de contado: el cliente paga "
-                 f"{om.money(res['seguro_anual'])} en cada aniversario; la mensualidad no sube desde el mes 13."))
 
 # ----------------------------------------------------------------------------- todos los planes
-st.markdown(f"##### :material/leaderboard: Planes a {plazo} meses")
+seccion("Planes del boletín", f"a {plazo} meses · ordenados por total de mensualidades")
 orden = {o["nombre"]: i for i, (_, o, _) in enumerate(ranking, 1)}
 filas = []
 for o in sorted(res["ops"], key=lambda o: orden.get(o["nombre"], 99)):
     e = res["evals"][o["nombre"]]
-    fila = {"#": str(orden.get(o["nombre"], "")), "Oferta": o["nombre"],
+    fila = {"#": str(orden.get(o["nombre"], "—")), "Oferta": o["nombre"],
             "Póliza año 1": om.texto_rango(res["rangos"][o["nombre"]])}
     if not e:
         filas.append(fila | {"Nota": "No maneja este plazo"})
@@ -176,29 +165,33 @@ for o in sorted(res["ops"], key=lambda o: orden.get(o["nombre"], 99)):
     fila |= {"Bono": e["forma"], "Pago inicial": e["pago_inicial"], "Desembolso": e["desembolso"],
              "Enganche": f"{e['pct']:.1%}"}
     if e["valida"]:
-        fila |= {"Mens. 1-12": e["mens"], "Mens. 13+": e["mens2"], "Tasa": f"{e['tasa']:.2f}%",
-                 "Total mensualidades": e["total"]}
+        fila |= {"Mensualidad": e["mens"], "Mens. 13+": e["mens2"], "Tasa": f"{e['tasa']:.2f}%",
+                 "Total": e["total"]}
     else:
         fila["Nota"] = e["motivo"]
     filas.append(fila)
-cols = ["#", "Oferta", "Bono", "Pago inicial", "Desembolso", "Enganche", "Mens. 1-12", "Mens. 13+", "Tasa",
-        "Total mensualidades", "Póliza año 1", "Nota"]
+cols = ["#", "Oferta", "Mensualidad", "Mens. 13+", "Tasa", "Pago inicial", "Desembolso", "Enganche", "Bono",
+        "Total", "Póliza año 1", "Nota"]
 df = pd.DataFrame(filas).reindex(columns=cols)
-if not seguro_anual and not seguro1:
-    df = df.drop(columns="Mens. 13+")   # sin seguro capturado es igual a la de los meses 1-12
+if not MOSTRAR_SEGURO_2 or (not seguro_anual and not seguro1):
+    df = df.drop(columns="Mens. 13+")
 if df["Nota"].isna().all():
     df = df.drop(columns="Nota")
-st.dataframe(df.style.apply(lambda r: [VERDE if r["#"] == "1" else GRIS if not r["#"] else ""] * len(r), axis=1),
+for c in ["Mensualidad", "Mens. 13+", "Pago inicial", "Desembolso", "Total"]:
+    if c in df:
+        df[c] = df[c].map(lambda x: om.money(x) if pd.notna(x) else None)
+df = df.fillna("—")
+st.dataframe(df.style.apply(lambda r: [RESALTE if r["#"] == "1" else APAGADO if r["#"] == "—" else ""] * len(r),
+                            axis=1),
              hide_index=True, width="stretch",
              column_config={"#": st.column_config.TextColumn("#", width="small"), "Oferta": TEXTO_L("Oferta"),
-                            "Nota": TEXTO_L("Nota")}
-             | {c: DOLAR(c) for c in ["Pago inicial", "Desembolso", "Mens. 1-12", "Mens. 13+",
-                                      "Total mensualidades"]})
-st.caption("Ordenados por total de mensualidades. «Póliza año 1»: rango del seguro de contado con el que el plan "
-           "cumple; en gris, los que no aplican.")
+                            "Nota": TEXTO_L("Nota")})
+nota("«Póliza año 1»: rango del seguro con el que el plan cumple. En gris, los planes que no aplican.")
 
 # ----------------------------------------------------------------------------- detalle
-t_plazo, t_min = st.tabs([":material/calendar_view_month: Por plazo", ":material/sell: Mínimos y oferta del auto"])
+seccion("Detalle")
+t_plazo, t_min, t_oferta = st.tabs([":material/calendar_view_month: Por plazo", ":material/flag: Mínimos por plan",
+                                    ":material/sell: Oferta del auto"])
 
 with t_plazo:
     mat, marca = [], []
@@ -212,10 +205,10 @@ with t_plazo:
         mat.append(fila)
         marca.append(fm)
     df_m, df_marca = pd.DataFrame(mat), pd.DataFrame(marca)
-    st.dataframe(df_m.style.apply(lambda col: [VERDE if col.name in df_marca and df_marca.loc[i, col.name] else ""
-                                               for i in col.index], axis=0),
+    st.dataframe(df_m.style.apply(lambda col: [RESALTE if col.name in df_marca and df_marca.loc[i, col.name]
+                                               else "" for i in col.index], axis=0),
                  hide_index=True, width="stretch", column_config={"Oferta": TEXTO_L("Oferta")})
-    st.caption("Mensualidad meses 1-12 (tasa) con lo capturado. En verde, la mejor de cada plazo.")
+    nota("Mensualidad meses 1-12 (tasa) con lo capturado. En verde, la mejor de cada plazo.")
 
 with t_min:
     filas_min, valores = [], []
@@ -232,25 +225,36 @@ with t_min:
         filas_min.append(fila)
         valores.append(val)
     df_min, df_val = pd.DataFrame(filas_min), pd.DataFrame(valores)
-    st.dataframe(df_min.style.apply(lambda col: [VERDE if col.name in df_val and pd.notna(df_val.loc[i, col.name])
+    st.dataframe(df_min.style.apply(lambda col: [RESALTE if col.name in df_val and pd.notna(df_val.loc[i, col.name])
                                                  and df_val.loc[i, col.name] == df_val[col.name].min() else ""
                                                  for i in col.index], axis=0),
                  hide_index=True, width="stretch",
                  column_config={"Oferta": TEXTO_L("Oferta"), "Desembolso mín.": DOLAR("Desembolso mín."),
                                 "Pago inicial mín.": DOLAR("Pago inicial mín.")})
-    st.caption(f"Con el enganche mínimo de cada plan (incluye seguro y GAP capturados; desembolso y pago inicial a "
-               f"{plazo} m). Mensualidad meses 1-12 (tasa); en verde, la menor de cada plazo.")
-    with st.expander("Oferta del boletín para este auto"):
-        st.markdown(D(res["descripcion"]))
-    st.download_button("PDF de mínimos de toda la oferta", pdf_minimos(om.BOLETIN, iva),
-                       file_name=f"Minimos_oferta_MG_{om.BOLETIN}.pdf", mime="application/pdf",
-                       icon=":material/table_view:", help="Todos los autos y planes del boletín.")
+    nota(f"Con el enganche mínimo de cada plan (incluye el seguro capturado; desembolso y pago inicial a {plazo} m). "
+         "Mensualidad meses 1-12 (tasa); en verde, la menor de cada plazo.")
 
-# ----------------------------------------------------------------------------- PDF
-st.divider()
+with t_oferta:
+    st.markdown(D(res["descripcion"]))
+
+# ----------------------------------------------------------------------------- descargas
+seccion("Descargas")
 slug = re.sub(r"[^A-Za-z0-9]+", "_", veh).strip("_")
-d1, d2 = st.columns([1, 3], vertical_alignment="center")
-d1.download_button("PDF del análisis", pdf(args, cliente.strip()), file_name=f"Mejor_oferta_{slug}_{plazo}m.pdf",
-                   mime="application/pdf", type="primary", width="stretch", icon=":material/picture_as_pdf:")
-d2.caption("Método del cotizador de Autoexpress: verifica la cifra final en el cotizador oficial. No incluye "
-           "Anualidades, University ni Seminuevos.")
+d1, d2 = st.columns(2)
+with d1.container(border=True):
+    st.markdown("**PDF del análisis**")
+    nota("Esta cotización: mejor opción, todos los planes y mensualidades por plazo.")
+    cliente = st.text_input("Cliente", key="of_cli", placeholder="Nombre del cliente (opcional)",
+                            label_visibility="collapsed")
+    st.download_button("Descargar análisis", pdf(args, cliente.strip()),
+                       file_name=f"Mejor_oferta_{slug}_{plazo}m.pdf", mime="application/pdf", type="primary",
+                       width="stretch", icon=":material/picture_as_pdf:")
+with d2.container(border=True):
+    st.markdown("**PDF de mínimos de toda la oferta**")
+    nota("Todos los autos y planes del boletín: enganche, desembolso y pago inicial mínimos y mensualidades.")
+    st.download_button("Descargar mínimos", pdf_minimos(om.BOLETIN, iva),
+                       file_name=f"Minimos_oferta_MG_{om.BOLETIN}.pdf", mime="application/pdf", width="stretch",
+                       icon=":material/table_view:")
+
+nota("Método del cotizador de Autoexpress: verifica la cifra final en el cotizador oficial. No incluye Anualidades, "
+     "University ni Seminuevos.")
