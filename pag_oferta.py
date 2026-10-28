@@ -104,25 +104,27 @@ if (pago_inicial if captura == "Pago inicial" else pago) <= 0:
     st.stop()
 
 
+# `version` (fecha de modificación de oferta_mg.py) entra a la llave del caché: si el cálculo cambia, no se reusan
+# resultados guardados con la versión anterior (les faltarían campos nuevos).
 @st.cache_data(show_spinner="Comparando ofertas…")
-def correr(*a):
+def correr(version, *a):
     return om.analizar(*a)
 
 
 @st.cache_data(show_spinner="Armando la tabla de mínimos…")
-def pdf_minimos(boletin, iva):
+def pdf_minimos(version, boletin, iva):
     return om.pdf_minimos(iva)
 
 
 @st.cache_data(show_spinner=False)
-def pdf(a, cliente):
-    return om.pdf_bytes(correr(*a), cliente)
+def pdf(version, a, cliente):
+    return om.pdf_bytes(correr(version, *a), cliente)
 
 
 args = (veh, float(pago), float(seguro1), float(seguro_anual), int(plazo), float(precio_manual), gap_modo, iva,
         float(pago_inicial) if captura == "Pago inicial" else 0.0, seguro1_fin, resto_fin,
         float(gap_monto) if gap_modo != "No" else 0.0)
-res = correr(*args)
+res = correr(om._mtime, *args)
 ranking = res["ranking"]
 
 # ----------------------------------------------------------------------------- mejor opción
@@ -254,13 +256,13 @@ with d1.container(border=True):
     nota("Esta cotización: mejor opción, comparativo de planes, mensualidad por plazo y requisitos del auto.")
     cliente = st.text_input("Cliente", key="of_cli", placeholder="Nombre del cliente (opcional)",
                             label_visibility="collapsed")
-    st.download_button("Descargar análisis", pdf(args, cliente.strip()),
+    st.download_button("Descargar análisis", pdf(om._mtime, args, cliente.strip()),
                        file_name=f"Mejor_oferta_{slug}_{plazo}m.pdf", mime="application/pdf", type="primary",
                        width="stretch", icon=":material/picture_as_pdf:")
 with d2.container(border=True):
     st.markdown("**PDF de mínimos de toda la oferta**")
     nota("Todos los autos y planes del boletín: enganche, desembolso y pago inicial mínimos y mensualidades.")
-    st.download_button("Descargar mínimos", pdf_minimos(om.BOLETIN, iva),
+    st.download_button("Descargar mínimos", pdf_minimos(om._mtime, om.BOLETIN, iva),
                        file_name=f"Minimos_oferta_MG_{om.BOLETIN}.pdf", mime="application/pdf", width="stretch",
                        icon=":material/table_view:")
 
