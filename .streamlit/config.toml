@@ -1,12 +1,27 @@
+# Tema oscuro estilo shadcn/ui (paleta «zinc»): fondo casi negro, tarjetas y bordes en gris zinc, acento claro.
 [theme]
-base = "light"
-primaryColor = "#12305C"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F3F6FA"
-textColor = "#1B2A41"
-font = "Archivo:https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap"
-headingFont = "Archivo:https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&display=swap"
-baseRadius = "medium"
+base = "dark"
+primaryColor = "#FAFAFA"
+backgroundColor = "#09090B"
+secondaryBackgroundColor = "#18181B"
+textColor = "#FAFAFA"
+borderColor = "#27272A"
+showWidgetBorder = true
+dataframeBorderColor = "#27272A"
+dataframeHeaderBackgroundColor = "#18181B"
+dataframeHeaderTextColor = "#A1A1AA"
+linkColor = "#FAFAFA"
+greenColor = "#22C55E"
+greenTextColor = "#4ADE80"
+greenBackgroundColor = "#14532D"
+redColor = "#EF4444"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFont = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+headingFontWeights = [700, 600, 600, 600, 600, 600]
+baseFontSize = 14
+baseRadius = "0.5rem"
+buttonRadius = "0.5rem"
+metricValueFontWeight = 700
 
 [server]
 maxUploadSize = 600
