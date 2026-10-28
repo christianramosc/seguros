@@ -190,3 +190,10 @@ client_email = "...@....iam.gserviceaccount.com"
 client_id = "..."
 token_uri = "https://oauth2.googleapis.com/token"
 ```
+
+## PDF del análisis
+
+Página 1: datos del auto, **mejor opción** (mensualidad, pago inicial, desembolso, precio del plan, enganche, monto
+financiado y total) y **comparativo de planes** (con el bono al precio, el precio del plan ya sale descontado), más los
+que no aplican y por qué. Página 2: **mensualidad por plazo** y **requisitos de la oferta** para el auto (enganche,
+desembolso y pago inicial mínimos por plan).
