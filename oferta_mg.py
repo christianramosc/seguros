@@ -7,7 +7,7 @@ Estándar 13.74%, Estándar 17.74% y Especial 12.09%), aplica el bono de cada fo
 precio, excluyente) y las compara como opciones separadas y dice la mejor opción por plazo y cuánto puede valer el seguro de contado para que cada
 opción siga siendo la ideal.
 
-Reglas (boletín BMGFS-16-10-2026, vigente del 09-oct al 02-nov-2026):
+Reglas del boletín (las tasas, bonos, precios y mínimos salen de los datos de la oferta; ver aplicar()):
   · Tasa baja: el bono ya va a la tasa → el cliente paga precio de lista.
   · Planes Estándar / 12.09% con bono: el bono puede ir al enganche o al precio (se muestran como dos opciones).
     Al enganche, el enganche mínimo INCLUYE el bono; al precio, el precio baja en el bono y el enganche mínimo se
@@ -36,111 +36,115 @@ Cálculo igual al cotizador de Autoexpress (validado contra cotizaciones reales,
   · Seguro de los años 2 en adelante: cada año se financia a 12 meses a la misma tasa (sube la mensualidad desde el
     mes 13). El seguro de vida de esos meses se aproxima (diferencia de centavos).
 
-Para un nuevo boletín: actualiza BOLETIN, CATALOGO, CURVAS y ofertas_para().
+Para un nuevo boletín: súbelo en la página «Oferta comercial» de la app (boletin_mg.py lee el PDF y aplicar() usa
+sus datos). El método de cálculo no cambia.
 """
+import hashlib
 import io
+import json
 import math
+import os
+from datetime import date, datetime
 from decimal import ROUND_HALF_DOWN, Decimal
-import re
-from datetime import datetime
-
-BOLETIN = "BMGFS-16-10-2026"
-OFERTA_MES = "Octubre 2026"
-VIGENCIA = "09/10/2026 al 02/11/2026"
 
 PLAZOS = [12, 24, 36, 48, 60, 72]
 IVA = 0.16
-
-# ------------------------------------------------------------------------------------
-# Curvas de tasa (12, 24, 36, 48, 60 meses) de las tablas de Tasa Baja
-# ------------------------------------------------------------------------------------
-CURVAS = {
-    # Tasa Baja + 0% CXA (págs. 3-4)
-    "A":  [0.00, 5.10, 7.70, 10.20, 11.00],
-    "B":  [0.00, 5.70, 8.30, 10.60, 11.40],
-    "C":  [0.00, 3.80, 6.80, 9.50, 10.40],
-    "D":  [0.00, 0.00, 2.20, 5.90, 7.50],
-    "E":  [0.00, 0.00, 4.10, 7.40, 8.70],
-    "E2": [0.00, 0.00, 4.10, 7.30, 8.70],
-    "F":  [0.00, 0.00, 0.00, 0.00, 2.60],
-    "G":  [0.00, 0.00, 0.00, 4.60, 6.40],
-    "H":  [0.00, 2.80, 6.10, 8.90, 10.00],
-    "I":  [4.20, 9.20, 10.70, 12.50, 13.00],
-    # Tasa Baja + 2% CXA (págs. 5-7)
-    "a":  [0.00, 1.40, 4.50, 6.20, 7.20],
-    "b":  [0.00, 2.40, 5.30, 6.80, 7.70],
-    "c":  [0.00, 0.00, 3.50, 5.40, 6.50],
-    "d":  [0.00, 0.00, 0.00, 0.00, 2.20],
-    "e":  [0.00, 0.00, 0.00, 2.70, 4.30],
-    "f":  [0.00, 0.00, 0.00, 0.00, 0.00],
-    "g":  [0.00, 0.00, 0.00, 1.40, 3.20],
-    "h":  [0.00, 0.00, 1.50, 3.90, 5.30],
-    "i":  [0.00, 5.70, 7.60, 9.00, 9.20],
-}
-
-# ------------------------------------------------------------------------------------
-# Catálogo: MSRP, bono, enganche sistema (color de la tabla de bonos: 20/25/30/40),
-# tasa baja 0% CXA (eng. mín, curva, baremos) y tasa baja 2% CXA (eng. mín, curva, baremos)
-# ------------------------------------------------------------------------------------
-def V(msrp, bono, color, tb0=None, tb2=None, lanz=False):
-    return dict(msrp=msrp, bono=bono, color=color, tb0=tb0, tb2=tb2, lanz=lanz)
-
-CATALOGO = {
-    "RX9 2025 2.0T COM ELEGANCE AT":            V(777000, 200000, 40, (22, "F", "425/452"), (30, "f", "454/597")),
-    "RX9 2025 2.0T LUX PREMIER AT":             V(869900, 140000, 30, (20, "D", "426/453"), (30, "e", "463/598")),
-    "MG4EV 2025 EDU COM 51 STYLE AT":           V(499000,  80000, 30, (22, "D", "426/453"), (30, "e", "463/598")),
-    "MG4EV 2025 EDU DEL 77 EXTENDED RANGE AT":  V(609000,  90000, 25, (20, "E", "448/586"), (30, "e", "463/598")),
-    "MGZS 2026 HEV COM EXCITE":                 V(545000, 100000, 30, (20, "D", "426/453"), (31, "d", "470/601")),
-    "MGZS 2026 HEV LUX ELEGANCE":               V(580000,  80500, 25, (20, "E", "448/586"), (32, "e", "463/598")),
-    "MGZS 2026 1.5T COM TURBO EXCITE CVT":      V(399900,  35000, 20, (23, "A", "431/458"), (33, "a", "469/600")),
-    "MGZS 2026 1.5T LUX TURBO ELEGANCE AT":     V(490000,  90500, 30, (24, "G", "434/466"), (30, "d", "470/601")),
-    "MGZS 2027 1.5T COM TURBO EXCITE AT":       V(399900,  35000, 20, (22, "A", "431/458"), (33, "a", "469/600")),
-    "MGZS 2027 1.5T LUX TURBO ELEGANCE AT":     V(490000,  90500, 30, (24, "G", "434/466"), (30, "d", "470/601")),
-    "New HS 2026 1.5T COM EXCITE AT":           V(599900, 100000, 30, (20, "D", "426/453"), (30, "g", "468/599")),
-    "New HS 2026 2.0T LUX TROPHY AT":           V(659900,  80000, 25, (20, "H", "450/592"), (32, "h", "480/629")),
-    "New HSHEV 2026 1.5L DEL EXCITE HYBRID AT": V(619900, 110000, 30, (20, "D", "426/453"), (33, "d", "470/601")),
-    "New HSHEV 2026 1.5L LUX PREMIER HYBRID AT":V(689900,  90000, 25, (24, "E", "448/586"), (36, "e", "463/598")),
-    "NEW MGHSHEV 2027 LUX PREMIER HYBRID AT":   V(689900,  90000, 25, (24, "E2", "448/586"), (36, "e", "463/598")),
-    "NEW MGHSPHEV 2026 1.5T TURBO EXCITE PHEV AT": V(714900, 110000, 25, (20, "E", "448/586"), (30, "e", "463/598")),
-    "NEW MGHSPHEV 2026 1.5T TURBO TROPHY PHEV AT": V(779900,  80000, 20, (25, "H", "450/592"), (32, "c", "473/624")),
-    "MG3 2026 1.5L COM STYLE MT":               V(306000,  30000, 20, (20, "A", "431/458"), (30, "a", "469/600")),
-    "MG3 2026 1.5L COM STYLE AT":               V(324000,  30000, 20, (20, "A", "431/458"), (30, "a", "469/600")),
-    "MG3 2026 1.5L DEL EXCITE AT":              V(364000,  30000, 20, (20, "B", "435/497"), (30, "b", "472/622")),
-    "MG3HEV 2026 1.5L COM EXCITE HYBRID AT":    V(422000,  45000, 25, (20, "C", "439/583"), (30, "c", "473/624")),
-    "MG3HEV 2026 1.5L LUX ELEGANCE HYBRID AT":  V(464000,  45000, 20, (24, "C", "439/583"), (35, "c", "473/624")),
-    "MG5 2027 1.5L STD STYLE MT":               V(299900,  25000, 20, (27, "A", "431/458"), (37, "a", "469/600")),
-    "MG5 2027 1.5L COM EXCITE MT":              V(344000,  60000, 30, (20, "D", "426/453"), (35, "d", "470/601")),
-    "MG5 2027 1.5L COM EXCITE AT":              V(378000,  60000, 30, (20, "E", "448/586"), (30, "e", "463/598")),
-    "MG5 2027 1.5L DEL ELEGANCE AT":            V(399000,  60000, 25, (20, "E", "448/586"), (30, "e", "463/598")),
-    "MG7 2026 2.0T COM PREMIER AT":             V(629000,  30000, 20, (20, "I", "449/588"), (37, "i", "476/625")),
-    # El boletín dice "Eng 30%" en el título pero 33% en la columna; se usa 33% (lo más estricto)
-    "MG7 2026 2.0T LUX TROPHY AT":              V(697000,  60000, 20, (22, "A", "431/458"), (33, "a", "469/600")),
-    # Modelos de lanzamiento (sin bono, precio manual)
-    "MG3 2027 STYLE (Lanzamiento)":             V(None, 0, None, lanz=True),
-    "MG3 2027 EXCITE (Lanzamiento)":            V(None, 0, None, lanz=True),
-    "ZS 2027 HEV LUX ELEGANCE (Lanzamiento)":   V(None, 0, None, lanz=True),
-    "MG4 2026 EXTENDED RANGE (Lanzamiento)":    V(None, 0, None, lanz=True),
-    "OTRO MODELO SIN BONO (precio manual)":     V(None, 0, None),
-}
-
-ENGANCHE_MAX = 0.75
 ENGANCHE_MIN_CLIENTE = 0.10   # referencia del boletín (redondeada); el cotizador acepta el mínimo exacto del sistema
-COLORES = {20: "gris", 25: "amarillo", 30: "azul", 40: "verde"}   # color en la tabla de bonos = enganche sistema
+OTRO = "OTRO MODELO SIN BONO (precio manual)"
 
-def curva_a_dict(curva):
-    return {p: t for p, t in zip([12, 24, 36, 48, 60], CURVAS[curva])}
+# ------------------------------------------------------------------------------------
+# La oferta comercial (datos del boletín)
+#   La base viene en oferta_base.json (boletín de octubre 2026). Cuando se sube un boletín nuevo en la página
+#   «Oferta comercial», boletin_mg.py lo lee y aplicar() reemplaza estos datos; el cálculo no cambia.
+#   Formato: ver boletin_mg.py (porcentajes en %, montos en pesos, plazos y enganches sistema como llaves de texto).
+# ------------------------------------------------------------------------------------
+BASE_JSON = "oferta_base.json"
 
-def estandar_1374():
-    return {12: 13.74, 24: 14.24, 36: 14.24, 48: 15.24, 60: 15.24, 72: 16.74}
 
-def estandar_1774(con_72=True):
-    d = {12: 17.74, 24: 18.24, 36: 18.24, 48: 19.24, 60: 19.24}
-    if con_72:
-        d[72] = 20.74
-    return d
+def _tasas(t):
+    return {int(p): float(x) for p, x in sorted((t or {}).items(), key=lambda kv: int(kv[0]))}
 
-def especial_1209():
-    return {12: 12.09, 24: 12.09, 36: 12.09, 48: 12.09, 60: 12.09, 72: 13.59}
+
+def huella(oferta):
+    """Identificador corto de los datos de la oferta (cambia si cambia cualquier precio, bono, tasa o mínimo)."""
+    datos = {k: oferta.get(k) for k in ("boletin", "mes", "vigencia", "inicio", "fin", "enganche_max", "colores",
+                                        "vehiculos", "planes_bono", "planes_sin_bono")}
+    return hashlib.sha1(json.dumps(datos, sort_keys=True, ensure_ascii=False).encode()).hexdigest()[:10]
+
+
+def oferta_base():
+    """Oferta incluida en la app (oferta_base.json; en el script de Colab va incrustada en OFERTA_BASE)."""
+    if "OFERTA_BASE" in globals():
+        return json.loads(json.dumps(globals()["OFERTA_BASE"]))
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), BASE_JSON), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def aplicar(oferta):
+    """Usa `oferta` (dict del boletín) para todos los cálculos y PDFs."""
+    global OFERTA, OFERTA_ID, BOLETIN, OFERTA_MES, VIGENCIA, VIGENCIA_FIN, ENGANCHE_MAX, COLORES, CATALOGO, \
+        PLANES_BONO, PLANES_SIN_BONO
+    o = json.loads(json.dumps(oferta))
+    pct = lambda x: float(x) / 100
+    planes_bono = [dict(baremo=str(p["baremo"]), cxa=pct(p.get("cxa") or 0),
+                        min={int(s): pct(m) for s, m in (p.get("min") or {}).items() if m not in (None, "")},
+                        tasas=_tasas(p["tasas"])) for p in o.get("planes_bono") or []]
+    planes_sin = [dict(baremo=str(p["baremo"]), cxa=pct(p.get("cxa") or 0), min=pct(p.get("min") or 0),
+                       max=pct(p["max"]) if p.get("max") else None, tasas=_tasas(p["tasas"]))
+                  for p in o.get("planes_sin_bono") or []]
+    catalogo = {}
+    for nombre, v in (o.get("vehiculos") or {}).items():
+        lz = v.get("lanzamiento")
+        catalogo[nombre] = dict(
+            msrp=v.get("msrp") or None, bono=v.get("bono") or 0, color=v.get("sistema") or None,
+            tb=[dict(eng=t["eng"], cxa=pct(t.get("cxa") or 0), baremo=str(t["baremo"]), tasas=_tasas(t["tasas"]))
+                for t in v.get("tasa_baja") or []],
+            lanz=(dict(eng=lz["eng"], cxa=pct(lz.get("cxa") or 0), baremo=str(lz["baremo"]), tasas=_tasas(lz["tasas"]))
+                  if lz else None))
+    catalogo[OTRO] = dict(msrp=None, bono=0, color=None, tb=[], lanz=None)
+    OFERTA, OFERTA_ID = o, huella(o)
+    BOLETIN = o.get("boletin") or "boletín sin clave"
+    OFERTA_MES = o.get("mes") or ""
+    VIGENCIA = o.get("vigencia") or ""
+    try:
+        VIGENCIA_FIN = date.fromisoformat(o["fin"]) if o.get("fin") else None
+    except ValueError:
+        VIGENCIA_FIN = None
+    ENGANCHE_MAX = pct(o.get("enganche_max") or 75)
+    COLORES = {int(s): c for s, c in (o.get("colores") or {}).items()}
+    PLANES_BONO, PLANES_SIN_BONO, CATALOGO = planes_bono, planes_sin, catalogo
+
+
+def color_de(sistema):
+    return COLORES.get(sistema) or f"sistema {sistema}%"
+
+
+def min_color(plan, sistema):
+    """Enganche mínimo de un plan con bono para el enganche sistema del auto. Si el boletín no trae ese sistema,
+    se usa la diferencia más común entre el mínimo del plan y el sistema (p. ej. 13.74% = sistema + 10)."""
+    if sistema in plan["min"]:
+        return plan["min"][sistema]
+    difs = [round(m - s / 100, 4) for s, m in plan["min"].items()]
+    return round(sistema / 100 + max(set(difs), key=difs.count), 4) if difs else None
+
+
+def min_real_cliente(v, precio):
+    """Enganche mínimo del cliente con el bono al enganche (el plan con bono de menor enganche), o None."""
+    if not v["color"] or not precio:
+        return None
+    mins = [m for p in PLANES_BONO if (m := min_color(p, v["color"])) is not None]
+    return (min(mins) if mins else v["color"] / 100) - v["bono"] / precio
+
+
+def nombre_plan(plan, tipo):
+    t = plan["tasas"][min(plan["tasas"])]
+    cxa = f"{plan['cxa'] * 100:g}% CXA"
+    if tipo == "tasa":
+        return f"Tasa Baja Eng {plan['eng']:g}% + {cxa}"
+    if tipo == "lanz":
+        return f"Lanzamiento {t:.2f}% + {cxa}"
+    return f"{'Especial' if plan['cxa'] else 'Estándar'} {t:.2f}% + {cxa}"
+
 
 # ------------------------------------------------------------------------------------
 # Ofertas aplicables al vehículo
@@ -152,35 +156,37 @@ def especial_1209():
 def ofertas_para(v):
     ops = []
     color = v["color"]
-    if v["tb0"]:
-        mn, cur, bar = v["tb0"]
-        ops.append(dict(nombre=f"Tasa Baja Eng {mn}% + 0% CXA", baremo=bar, cxa=0.00,
-                        modo="tasa", min=mn/100, max=None, tasas=curva_a_dict(cur)))
-    if v["tb2"]:
-        mn, cur, bar = v["tb2"]
-        ops.append(dict(nombre=f"Tasa Baja Eng {mn}% + 2% CXA", baremo=bar, cxa=0.02,
-                        modo="tasa", min=mn/100, max=None, tasas=curva_a_dict(cur)))
+    for t in v["tb"]:
+        ops.append(dict(nombre=nombre_plan(t, "tasa"), baremo=t["baremo"], cxa=t["cxa"], modo="tasa",
+                        min=t["eng"] / 100, max=None, tasas=dict(t["tasas"])))
     if v["lanz"]:
-        ops.append(dict(nombre="Lanzamiento 8.99% + 2% CXA", baremo="421/451", cxa=0.02,
-                        modo="sin_bono", min=0.30, max=None,
-                        tasas={p: 8.99 for p in [12, 24, 36, 48, 60]}))
+        lz = v["lanz"]
+        ops.append(dict(nombre=nombre_plan(lz, "lanz"), baremo=lz["baremo"], cxa=lz["cxa"], modo="sin_bono",
+                        min=lz["eng"] / 100, max=None, tasas=dict(lz["tasas"])))
     if color:   # vehículo marcado en la tabla de bonos: cada plan con el bono al enganche y con el bono al precio
-        planes = [("Estándar 13.74% + 0% CXA", "413/419", 0.00, color + 10, estandar_1374()),
-                  ("Estándar 17.74% + 0% CXA", "414/441", 0.00, color, estandar_1774(True)),
-                  ("Especial 12.09% + 2% CXA", "420/446", 0.02, color + 20, especial_1209())]
         for forma, modo in (("enganche", "flex_eng"), ("precio", "flex_precio")):
-            for nom, bar, cxa, mn, tasas in planes:
-                ops.append(dict(nombre=f"{nom} (bono al {forma})", baremo=bar, cxa=cxa, modo=modo, min=mn / 100,
-                                max=None, tasas=tasas))
+            for p in PLANES_BONO:
+                mn = min_color(p, color)
+                if mn is None:
+                    continue
+                ops.append(dict(nombre=f"{nombre_plan(p, 'std')} (bono al {forma})", baremo=p["baremo"], cxa=p["cxa"],
+                                modo=modo, min=mn, max=None, tasas=dict(p["tasas"])))
     else:       # toda la gama sin marca
-        modo_std = "sin_bono"
-        ops.append(dict(nombre="Estándar 13.74% + 0% CXA", baremo="412/417", cxa=0.00,
-                        modo=modo_std, min=0.20, max=None, tasas=estandar_1374()))
-        ops.append(dict(nombre="Estándar 17.74% + 0% CXA (enganche 10% a <20%)", baremo="412/417", cxa=0.00,
-                        modo=modo_std, min=0.10, max=0.20, tasas=estandar_1774(False)))
-        ops.append(dict(nombre="Especial 12.09% + 2% CXA", baremo="415/443", cxa=0.02,
-                        modo=modo_std, min=0.30, max=None, tasas=especial_1209()))
+        for p in PLANES_SIN_BONO:
+            nombre = nombre_plan(p, "std")
+            if p["max"]:
+                nombre += f" (enganche {p['min']:.0%} a <{p['max']:.0%})"
+            ops.append(dict(nombre=nombre, baremo=p["baremo"], cxa=p["cxa"], modo="sin_bono", min=p["min"],
+                            max=p["max"], tasas=dict(p["tasas"])))
+    vistos = set()
+    for o in ops:                 # nombres únicos (el análisis los usa como llave)
+        if o["nombre"] in vistos:
+            o["nombre"] += f" · {o['baremo']}"
+        vistos.add(o["nombre"])
     return ops
+
+
+aplicar(oferta_base())
 
 
 # GAP: cada rango de precio del vehículo tiene su monto. PENDIENTE: aún no se tiene la tabla.
@@ -276,7 +282,7 @@ def evaluar(op, n, d):
         elif op["max"] is not None and pct >= op["max"] - 1e-9:
             motivo = f"Enganche {pct:.1%}: aplica desde {op['max']:.0%} otra tasa"
         elif pct > ENGANCHE_MAX + 1e-9:
-            motivo = f"Enganche {pct:.1%} mayor al máximo 75%"
+            motivo = f"Enganche {pct:.1%} mayor al máximo {ENGANCHE_MAX:.0%}"
         elif cap <= 0:
             motivo = "No queda monto a financiar"
         ti = tasa_con_iva(op["tasas"][n], d["iva"])
@@ -423,24 +429,30 @@ def mens_minimo(op, d):
 def describir(vehiculo, precio, bono):
     """Descripción de la oferta del boletín para el auto."""
     v = CATALOGO[vehiculo]
+    tasa1 = lambda p: f"{p['tasas'][min(p['tasas'])]:.2f}%"
+    gama = ", ".join(f"{tasa1(p)} " + (f"de {p['min']:.0%} a menos de {p['max']:.0%}" if p["max"]
+                                       else f"desde {p['min']:.0%}") for p in PLANES_SIN_BONO)
     if v["color"]:
         pct_b = bono / precio
-        real = v["color"] / 100 - pct_b
-        txt = (f"Marcado en {COLORES[v['color']]} en la tabla de bonos (enganche sistema {v['color']}%). Bono MG de "
+        real = min_real_cliente(v, precio)
+        mins = ", ".join(f"{tasa1(p)} desde {min_color(p, v['color']):.0%}" for p in PLANES_BONO
+                         if min_color(p, v["color"]) is not None)
+        txt = (f"Marcado en {color_de(v['color'])} en la tabla de bonos (enganche sistema {v['color']}%). Bono MG de "
                f"{money0(bono)} ({pct_b:.1%} del precio de lista {money0(precio)}), pagado 100% por MG Motors "
                f"México. El bono se usa de una sola forma: a la tasa (planes de Tasa Baja: el cliente paga precio de "
                f"lista y aporta todo el enganche), al enganche o al precio (planes Estándar y Especial; se comparan como "
-               f"opciones separadas). Con el bono al enganche el cliente aporta desde {real:.2%} "
-               f"({money0(real * precio)}) y el bono completa el {v['color']}% del sistema en el plan 17.74%; los planes "
-               f"13.74% y 12.09% piden {v['color'] + 10}% y {v['color'] + 20}%. Con el bono al precio el auto queda en "
-               f"{money0(precio - bono)} y el cliente pone el enganche completo sobre ese precio.")
+               f"opciones separadas). Enganche mínimo de los planes con bono: {mins}. Con el bono al enganche ese "
+               f"mínimo incluye el bono: el cliente aporta desde {real:.2%} ({money0(real * precio)}). Con el bono al "
+               f"precio el auto queda en {money0(precio - bono)} y el cliente pone el enganche completo sobre ese "
+               f"precio.")
     elif v["lanz"]:
-        txt = ("Modelo de lanzamiento: tasa 8.99% con 2% de comisión desde 30% de enganche (12 a 60 meses). No tiene "
-               "bono; también aplican los planes de toda la gama (13.74% desde 20%, 12.09% desde 30%).")
+        lz = v["lanz"]
+        txt = (f"Modelo de lanzamiento: tasa {tasa1(lz)} con {lz['cxa'] * 100:g}% de comisión desde {lz['eng']:g}% de "
+               f"enganche ({min(lz['tasas'])} a {max(lz['tasas'])} meses). No tiene bono; también aplican los planes de "
+               f"toda la gama ({gama}).")
     else:
-        txt = ("Sin bono en la tabla de bonos: aplican los planes de toda la gama (13.74% desde 20%, 17.74% de 10% a "
-               "menos de 20%, 12.09% desde 30%).")
-    return txt + (" Enganche máximo 75%. Enganche menor a 20%: +4% a la tasa. "
+        txt = f"Sin bono en la tabla de bonos: aplican los planes de toda la gama ({gama})."
+    return txt + (f" Enganche máximo {ENGANCHE_MAX:.0%}. Enganche menor a 20%: +4% a la tasa. "
                   f"Oferta vigente {VIGENCIA}.")
 
 
@@ -727,8 +739,8 @@ def pdf_bytes(res, cliente=""):
                 "(como en la cotización). Desembolso = lo que pone el cliente de su bolsa (pago inicial − bono al "
                 "enganche). Con el bono al precio, el auto queda en precio de lista − bono y el enganche se calcula "
                 "sobre ese precio. Mensualidad = pago fijo del capital + seguro de vida (y del seguro financiado, si "
-                "aplica). Enganche menor a 20%: +4% a la tasa; máximo 75%. No incluye Anualidades, University ni "
-                "Seminuevos.", s_small)]
+                f"aplica). Enganche menor a 20%: +4% a la tasa; máximo {ENGANCHE_MAX:.0%}. No incluye Anualidades, "
+                "University ni Seminuevos.", s_small)]
 
     # ---------------------------------------------------------------- mensualidades por plazo
     con_opcion = [o for o in res["ops"] if any(e and e["valida"] for e in res["matriz"][o["nombre"]].values())]
@@ -766,9 +778,9 @@ def pdf_bytes(res, cliente=""):
     bloque = titulo("Requisitos de la oferta para este auto", f"mínimos a {plazo} meses con el seguro capturado")
     v = CATALOGO[res["vehiculo"]]
     if v["color"]:
-        resumen = (f"Color <b>{COLORES[v['color']]}</b> en la tabla de bonos (enganche sistema {v['color']}%) · bono MG "
+        resumen = (f"Color <b>{color_de(v['color'])}</b> en la tabla de bonos (enganche sistema {v['color']}%) · bono MG "
                    f"<b>{money0(res['bono'])}</b> ({res['bono'] / res['precio']:.1%} del precio). El bono va a la tasa "
-                   f"(Tasa Baja), al enganche (el cliente aporta desde {v['color'] / 100 - res['bono'] / res['precio']:.2%}) "
+                   f"(Tasa Baja), al enganche (el cliente aporta desde {min_real_cliente(v, res['precio']):.2%}) "
                    f"o al precio (el auto queda en {money0(res['precio'] - res['bono'])}).")
     else:
         resumen = res["descripcion"]
@@ -802,7 +814,7 @@ def tabla_minimos(iva=True):
     plazo máximo del plan. Los modelos sin precio en el boletín salen solo con porcentajes y tasas."""
     salida = []
     for veh, v in CATALOGO.items():
-        if veh.startswith("OTRO"):
+        if veh == OTRO:
             continue
         precio = v["msrp"]
         d = dict(precio=precio or 0.0, gap=0.0, gap_contado=0.0, bono=v["bono"], pago=0.0, seguro1=0.0,
@@ -827,7 +839,7 @@ def tabla_minimos(iva=True):
             planes.append(fila)
         salida.append(dict(vehiculo=veh, precio=precio, bono=v["bono"], color=COLORES.get(v["color"]),
                            sistema=v["color"], lanz=v["lanz"], planes=planes,
-                           min_real=(v["color"] / 100 - v["bono"] / precio if v["color"] else None)))
+                           min_real=min_real_cliente(v, precio)))
     return salida
 
 
@@ -888,7 +900,7 @@ def pdf_minimos(iva=True):
                "plazo máximo de cada plan («—» si el plan no maneja ese plazo); en verde, la menor del auto en cada "
                "plazo. La comisión aquí no incluye la del seguro financiado (2.32% de los seguros de los años 2 en "
                "adelante en planes con comisión). Color del bloque = color en la tabla de bonos (enganche sistema): "
-               "gris 20%, amarillo 25%, azul 30%, verde 40%.", s_p), Spacer(1, 8)]
+               + ", ".join(f"{c} {s}%" for s, c in sorted(COLORES.items())) + ".", s_p), Spacer(1, 8)]
 
     fijas = ["Plan", "Eng. mín. sistema", "Eng. mín. real cliente", "Comisión", "Desembolso mínimo",
              "Pago inicial mínimo", "Financiado"]
@@ -911,7 +923,7 @@ def pdf_minimos(iva=True):
         # fila 0: auto · filas 1-2: cabeceras agrupadas · de la 3 en adelante: un plan por fila
         filas = [[P(f"{a['vehiculo']} <font size=7.3 color='#5A5A5A'>· {det}</font>", s_veh)] + [""] * (ncol - 1),
                  cab1, cab2]
-        est = [("SPAN", (0, 0), (-1, 0)), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(FONDO[a["color"]])),
+        est = [("SPAN", (0, 0), (-1, 0)), ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(FONDO.get(a["color"], "#F3F3F3"))),
                ("BACKGROUND", (0, 1), (-1, 2), NEGRO), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                ("SPAN", (0, 1), (0, 2)), ("SPAN", (1, 1), (2, 1)), ("SPAN", (3, 1), (6, 1)), ("SPAN", (c0, 1), (-1, 1)),
                ("LINEBELOW", (1, 1), (-1, 1), 0.4, TXT2),
@@ -946,9 +958,9 @@ def pdf_minimos(iva=True):
         t = Table(filas, colWidths=[ancho * x for x in cw])
         t.setStyle(TableStyle(est))
         story += [KeepTogether(t), Spacer(1, 9)]
-    story.append(P("Enganche mínimo real del cliente: con bono al enganche = enganche sistema − % del bono, nunca menos "
-                   "de 10%; en Tasa Baja el bono va a la tasa y el cliente pone todo el enganche. Enganche menor a 20%: "
-                   "+4% a la tasa; máximo 75%. Cálculo con el método del cotizador de Autoexpress: verificar en el "
-                   "cotizador oficial.", s_small))
+    story.append(P("Enganche mínimo real del cliente: con bono al enganche = enganche mínimo del plan − % del bono "
+                   "(exacto, como lo acepta el cotizador); en Tasa Baja el bono va a la tasa y el cliente pone todo el "
+                   f"enganche. Enganche menor a 20%: +4% a la tasa; máximo {ENGANCHE_MAX:.0%}. Cálculo con el método "
+                   "del cotizador de Autoexpress: verificar en el cotizador oficial.", s_small))
     doc.build(story)
     return archivo.getvalue()

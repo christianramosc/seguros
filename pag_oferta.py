@@ -12,22 +12,19 @@ plazo», «Mínimos por plan» y «Oferta del auto» → descargas (PDF del aná
 Por ahora sin GAP (faltan los precios actualizados) ni seguro de los años 2+: se activan con MOSTRAR_GAP y
 MOSTRAR_SEGURO_2.
 """
-import importlib
-import os
+import datetime as dt
 import re
 
 import pandas as pd
 import streamlit as st
 
-import oferta_mg as om
+import oferta_guardada
 from ui import APAGADO, RESALTE, VERDE_T, hero, insignias, nota, seccion, tarjeta
 
-# Streamlit Cloud conserva los módulos importados entre despliegues: si oferta_mg.py cambió (boletín nuevo, ajustes),
-# se recarga para no usar la versión anterior.
-_mtime = os.path.getmtime(om.__file__)
-if getattr(om, "_mtime", None) != _mtime:
-    om = importlib.reload(om)
-    om._mtime = _mtime
+# oferta_mg al día (Streamlit Cloud conserva los módulos entre despliegues) y con la oferta comercial que se subió en
+# la página «Oferta comercial» (o la incluida en la app si no se ha subido otra).
+om = oferta_guardada.motor()
+VERSION = f"{om._mtime}-{om.OFERTA_ID}"     # llave de los cachés: cambia con el código o con la oferta
 
 MOSTRAR_GAP = False        # desactivado hasta tener los precios de GAP actualizados
 MOSTRAR_SEGURO_2 = False   # seguro de los años 2+ oculto: la mensualidad no lo incluye
@@ -38,6 +35,9 @@ TEXTO_L = lambda t: st.column_config.TextColumn(t, width="large")
 
 hero("Mejor oferta MG", "Compara todas las ofertas del boletín con lo que trae el cliente.",
      f"Boletín {om.BOLETIN} · vigente {om.VIGENCIA}")
+if om.VIGENCIA_FIN and dt.date.today() > om.VIGENCIA_FIN:
+    st.warning(f"La oferta {om.BOLETIN} terminó el {om.VIGENCIA_FIN:%d/%m/%Y}. Sube el boletín nuevo en «Oferta "
+               "comercial» para usar los bonos y tasas vigentes.", icon=":material/event_busy:")
 
 # ----------------------------------------------------------------------------- datos de la operación
 autos = list(om.CATALOGO)
@@ -47,13 +47,16 @@ st.session_state.setdefault("of_pi", 0)
 seguro_anual, resto_fin, gap_modo, gap_monto = 0.0, False, "No", 0.0
 with st.container(border=True):
     a1, a2 = st.columns([3, 1], vertical_alignment="bottom")
-    veh = a1.selectbox("Auto", autos, index=autos.index("MG5 2027 1.5L COM EXCITE AT"), key="of_veh")
+    if st.session_state.get("of_veh") not in autos:      # el auto ya no está en la oferta nueva
+        st.session_state.pop("of_veh", None)
+    defecto = "MG5 2027 1.5L COM EXCITE AT"
+    veh = a1.selectbox("Auto", autos, index=autos.index(defecto) if defecto in autos else 0, key="of_veh")
     v = om.CATALOGO[veh]
     precio_manual = a2.number_input("Precio", min_value=0, value=0, step=1000, key="of_precio",
                                     help="0 = precio de lista. Obligatorio en Lanzamiento y «Otro».")
     if v["msrp"]:
         insignias([f"Lista {om.money0(v['msrp'])}", f"Bono {om.money0(v['bono'])}" if v["bono"] else "Sin bono",
-                   f"Sistema {v['color']}% · {om.COLORES[v['color']]}" if v["color"] else ""])
+                   f"Sistema {v['color']}% · {om.color_de(v['color'])}" if v["color"] else ""])
     else:
         insignias(["Sin precio en el boletín: captúralo en «Precio»"])
 
@@ -104,8 +107,8 @@ if (pago_inicial if captura == "Pago inicial" else pago) <= 0:
     st.stop()
 
 
-# `version` (fecha de modificación de oferta_mg.py) entra a la llave del caché: si el cálculo cambia, no se reusan
-# resultados guardados con la versión anterior (les faltarían campos nuevos).
+# `version` (código de oferta_mg.py + oferta comercial en uso) entra a la llave del caché: si cambia el cálculo o se
+# sube un boletín nuevo, no se reusan resultados de la versión anterior.
 @st.cache_data(show_spinner="Comparando ofertas…")
 def correr(version, *a):
     return om.analizar(*a)
@@ -124,7 +127,7 @@ def pdf(version, a, cliente):
 args = (veh, float(pago), float(seguro1), float(seguro_anual), int(plazo), float(precio_manual), gap_modo, iva,
         float(pago_inicial) if captura == "Pago inicial" else 0.0, seguro1_fin, resto_fin,
         float(gap_monto) if gap_modo != "No" else 0.0)
-res = correr(om._mtime, *args)
+res = correr(VERSION, *args)
 ranking = res["ranking"]
 
 # ----------------------------------------------------------------------------- mejor opción
@@ -256,13 +259,13 @@ with d1.container(border=True):
     nota("Esta cotización: mejor opción, comparativo de planes, mensualidad por plazo y requisitos del auto.")
     cliente = st.text_input("Cliente", key="of_cli", placeholder="Nombre del cliente (opcional)",
                             label_visibility="collapsed")
-    st.download_button("Descargar análisis", pdf(om._mtime, args, cliente.strip()),
+    st.download_button("Descargar análisis", pdf(VERSION, args, cliente.strip()),
                        file_name=f"Mejor_oferta_{slug}_{plazo}m.pdf", mime="application/pdf", type="primary",
                        width="stretch", icon=":material/picture_as_pdf:")
 with d2.container(border=True):
     st.markdown("**PDF de mínimos de toda la oferta**")
     nota("Todos los autos y planes del boletín: enganche, desembolso y pago inicial mínimos y mensualidades.")
-    st.download_button("Descargar mínimos", pdf_minimos(om._mtime, om.BOLETIN, iva),
+    st.download_button("Descargar mínimos", pdf_minimos(VERSION, om.BOLETIN, iva),
                        file_name=f"Minimos_oferta_MG_{om.BOLETIN}.pdf", mime="application/pdf", width="stretch",
                        icon=":material/table_view:")
 
