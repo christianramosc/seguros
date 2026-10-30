@@ -107,16 +107,42 @@ exactas, las otras 2 a $0.01).
 o **al precio**, y cada forma aparece como una opción separada en el comparativo (al precio, el auto queda en precio −
 bono y el enganche mínimo se calcula sobre ese precio).
 
-**Cada mes** actualiza en `oferta_mg.py`: `BOLETIN`, `OFERTA_MES`, `VIGENCIA`, `CATALOGO` (precios, bonos, enganche
-sistema y tasas bajas), `CURVAS` y, cuando la tengas, `TABLA_GAP`.
+## Oferta comercial (pestaña de arriba): subir el boletín nuevo
+
+Cada mes, en **Oferta comercial** subes el PDF del boletín de MG Financial Services. La app lo lee
+(`boletin_mg.py`): autos, precio de lista, bono y enganche sistema (color) de la tabla de bonos; la tasa baja de cada
+versión (0% y 2% de comisión); los planes Estándar / Especial por color y los de toda la gama; y los lanzamientos.
+Antes de guardar muestra:
+
+- **Revisa estos puntos**: lo que no cuadró (p. ej. un título que dice «Eng 30%» y la columna 33%).
+- Las tablas para **corregir a mano** cualquier dato (Datos generales, Autos y bonos, Tasa baja, Planes con bono,
+  Planes sin bono, Lanzamiento).
+- **Qué cambia** contra la oferta en uso (autos nuevos o que salen, precios, bonos, tasas, mínimos por color).
+- **Mínimos con esta oferta**: desembolso mínimo y mensualidad de cada auto, en verde lo que cambia.
+
+Al dar **Guardar y usar esta oferta**, toda la app (comparativo, mínimos, PDFs) calcula con ella con el mismo método
+del cotizador. La anterior queda para **Volver a la anterior**, y se puede **descargar un respaldo .json** (que también
+se puede volver a subir). Si nada se ha subido, se usa la oferta incluida en la app (`oferta_base.json`, boletín
+BMGFS-16-10-2026). Al terminar la vigencia, «Mejor oferta MG» avisa que hay que subir el boletín nuevo.
+
+**Dónde se guarda** (`oferta_guardada.py`): en el Google Sheet de `SEGUIMIENTO_SHEET_URL` (o `POLIZAS_SHEET_URL`), en
+la pestaña oculta `_Oferta_MG`, con la misma `[gcp_service_account]`: así sigue activa aunque la app se reinicie. Sin
+esos secrets se guarda solo en el servidor (se pierde si Streamlit reinicia la app).
+
+Validado: el boletín de octubre leído del PDF da exactamente el mismo catálogo, planes, mensualidades y mínimos que
+los datos que antes estaban fijos en el código (33 autos, 132 análisis y la tabla de mínimos, sin una sola diferencia).
 
 ## Archivos
 
 ```
-streamlit_app.py      # entrada: contraseña y pestañas de arriba (Pólizas · Mejor oferta MG)
+streamlit_app.py      # entrada: contraseña y pestañas de arriba (Pólizas · Mejor oferta MG · Oferta comercial)
 pag_polizas.py        # página Pólizas (carga, pestañas, descargas)
 pag_oferta.py         # página Mejor oferta MG
-oferta_mg.py          # catálogo del boletín, cálculo de ofertas y PDF del análisis
+pag_boletin.py        # página Oferta comercial (subir el boletín, revisar, corregir y guardar)
+oferta_mg.py          # cálculo de ofertas (método del cotizador), PDF del análisis y PDF de mínimos
+oferta_base.json      # oferta incluida en la app (boletín BMGFS-16-10-2026)
+boletin_mg.py         # lee el PDF del boletín (pdfplumber) y lo convierte en datos
+oferta_guardada.py    # guarda la oferta subida (Google Sheet / servidor) y la aplica en toda la app
 ui.py                 # estilos y tarjetas compartidas
 seguimiento.py        # estatus por fecha, proyección por mes, seguimiento en el Excel y PDF
 polizas.py            # lee los PDF de pólizas y arma el Excel (también corre suelto en Colab)
