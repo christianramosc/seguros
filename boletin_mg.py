@@ -216,10 +216,13 @@ def leer_boletin(datos, nombre=""):
     mes = f"{m.group(1).capitalize()} {m.group(2)}" if m else ""
     anio = int(m.group(2)) if m else dt.date.today().year
     inicio = fin = None
-    m = re.search(r"del\s*(\d{1,2})\s*de\s*([a-záéíóú]+)\s*al\s*(\d{1,2})\s*de\s*([a-záéíóú]+)", _txt(texto), re.I)
+    # «del 09 de octubre al 02 de noviembre» o «del 03 al 30 de noviembre»
+    m = re.search(r"del\s*(\d{1,2})\s*(?:de\s*([a-záéíóú]+)\s*)?al\s*(\d{1,2})\s*de\s*([a-záéíóú]+)", _txt(texto),
+                  re.I)
     if m:
         try:
-            m1, m2 = MESES.index(_plano(m.group(2)).lower()) + 1, MESES.index(_plano(m.group(4)).lower()) + 1
+            m2 = MESES.index(_plano(m.group(4)).lower()) + 1
+            m1 = MESES.index(_plano(m.group(2)).lower()) + 1 if m.group(2) else m2
             inicio = dt.date(anio - (1 if m1 == 12 and m2 == 1 else 0), m1, int(m.group(1)))
             fin = dt.date(anio + (1 if m2 < m1 else 0), m2, int(m.group(3)))
         except (ValueError, IndexError):
@@ -284,6 +287,13 @@ def leer_boletin(datos, nombre=""):
                 continue
             if "TASABAJA" in of.replace(" ", ""):
                 tasa_baja.append(b)
+                ps = sorted(b["tasas"])
+                # tasa baja: 12, 24, 36, 48, 60. Si viene «72» en lugar de 60 es errata del boletín
+                if 72 in ps and 60 not in ps and ps[-2:] == [48, 72]:
+                    b["tasas"][60] = b["tasas"].pop(72)
+                    avisos.append(f"Tasa baja {_txt(b['modelo'])} {_anio(b['my'])} "
+                                  f"«{_txt(str(b['oferta']).splitlines()[-1])}»: el boletín dice 72 meses después de "
+                                  f"48 (falta 60); se tomó como 60 meses ({b['tasas'][60]:.2f}%).")
             elif "LANZAMIENTO" in of:
                 lanz.append(b)
             elif "FLEXIBLE" in of or "GAMA" in mod:
@@ -351,10 +361,19 @@ def leer_boletin(datos, nombre=""):
             p = next((p for p in planes_bono if p["baremo"].split("/")[0] == pf), None)
             if not p:
                 continue
+            difs = [p["min"][s] - s for s in p["min"]]
+            usual = max(set(difs), key=difs.count) if difs else None      # p. ej. 13.49% = sistema + 10
             for s, f in zip(sistemas, filas):
-                if j < len(f) and _pct(f[j]) is not None and p["min"].get(s) != _pct(f[j]):
-                    avisos.append(f"Plan {p['baremo']}, sistema {s}%: la tabla de mínimos dice {_pct(f[j]):g}% y "
-                                  f"el plan {p['min'].get(s)}%.")
+                tabla = _entero(_pct(f[j])) if j < len(f) else None
+                plan = p["min"].get(s)
+                if tabla is None or plan == tabla:
+                    continue
+                # el que siga la regla de los demás colores es el bueno (el otro es errata del boletín)
+                bueno = tabla if usual is not None and tabla - s == usual else plan if plan is not None else tabla
+                p["min"][s] = bueno
+                avisos.append(f"Plan {p['baremo']}, sistema {s}% ({colores.get(s, '')}): el plan dice {plan}% y la "
+                              f"tabla de enganche mínimo {tabla:g}%. Se usa {bueno:g}% (sigue la regla de los demás "
+                              f"colores); corrígelo en «Planes con bono» si no es así.")
 
     # ---------------------------------------------------------------- tasa baja → autos
     for b in tasa_baja:
