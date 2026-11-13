@@ -279,13 +279,21 @@ def leer_boletin(datos, nombre=""):
 
     # ---------------------------------------------------------------- tablas de planes
     tasa_baja, lanz, estandar = [], [], []
-    for t in tablas:
-        for b in _bloques(t):
+    serie, en_tb = -1, False        # serie de tasa baja: el boletín trae dos juegos (p. ej. 0% y 2% CXA, o dos
+    for t in tablas:                # enganches con la misma comisión), separados por otras tablas de planes
+        bloques = _bloques(t)
+        hay_tb = any("TASABAJA" in _plano(b["oferta"]).replace(" ", "") for b in bloques)
+        if hay_tb and not en_tb:
+            serie += 1
+        if bloques:
+            en_tb = hay_tb
+        for b in bloques:
             of = _plano(b["oferta"])
             mod = _plano(b["modelo"])
             if any(k in of for k in OTROS_PLANES) or any(k in mod for k in OTROS_PLANES):
                 continue
             if "TASABAJA" in of.replace(" ", ""):
+                b["serie"] = serie
                 tasa_baja.append(b)
                 ps = sorted(b["tasas"])
                 # tasa baja: 12, 24, 36, 48, 60. Si viene «72» en lugar de 60 es errata del boletín
@@ -304,7 +312,15 @@ def leer_boletin(datos, nombre=""):
     colores_vistos = []
     for b in estandar:
         nota = _plano(b["nota"]).lower()
-        if not nota or "excepto" in nota:
+        # plan solo para ciertos modelos («Nuevos MG5 y ZS»), sin importar el color
+        lineas = [x for x in _plano(b["modelo"]).replace("\n", " ").split() if x not in ("NUEVOS", "NUEVO")]
+        texto_mod = " ".join(lineas)
+        b["modelos"] = None
+        if texto_mod and "GAMA" not in texto_mod and "TODOS" not in texto_mod:
+            b["modelos"] = sorted({_modelo(x) for x in re.split(r"\s*(?:,|\bY\b)\s*", texto_mod) if _modelo(x)})
+        if b["modelos"]:
+            b["color"] = None
+        elif not nota or "excepto" in nota:
             b["color"] = None
             if not nota:
                 avisos.append(f"Plan {_baremo(b)} sin nota de a qué autos aplica: lo tomé como de toda la gama.")
@@ -327,10 +343,16 @@ def leer_boletin(datos, nombre=""):
         if eng is None or not b["tasas"]:
             avisos.append(f"Plan {_baremo(b)}: no pude leer el enganche o las tasas.")
             continue
-        if b["color"]:
+        if b["modelos"]:
+            planes_bono.append(dict(baremo=_baremo(b), cxa=_entero(cxa), min={s: _entero(eng) for s in sistemas},
+                                    tasas=dict(b["tasas"]), modelos=b["modelos"]))
+            avisos.append(f"Plan {_baremo(b)} ({_txt(b['oferta'])}): solo para los modelos "
+                          f"{_txt(b['modelo']).replace('Nuevos ', '')} con bono, desde {eng:g}% de enganche (incluye "
+                          f"el bono) en todos los colores.")
+        elif b["color"]:
             if b["color"] not in sis_de:
                 continue
-            p = next((p for p in planes_bono if p["baremo"] == _baremo(b)), None)
+            p = next((p for p in planes_bono if p["baremo"] == _baremo(b) and not p.get("modelos")), None)
             if p is None:
                 p = dict(baremo=_baremo(b), cxa=_entero(cxa), min={}, tasas=dict(b["tasas"]))
                 planes_bono.append(p)
@@ -401,10 +423,10 @@ def leer_boletin(datos, nombre=""):
             if _electrico(b["modelo"] + " " + b["version"]) != _electrico(nombre):
                 puntos -= 5
             if puntos >= 3:
-                cxa = _pct(b["cxa"]) or 0
-                candidatos.setdefault((nombre, cxa), []).append((puntos, b))
-    for (nombre, cxa), opciones in candidatos.items():
+                candidatos.setdefault((nombre, b["serie"]), []).append((puntos, b))
+    for (nombre, _serie), opciones in candidatos.items():
         opciones.sort(key=lambda x: -x[0])
+        cxa = _pct(opciones[0][1]["cxa"]) or 0
         if len(opciones) > 1 and opciones[0][0] == opciones[1][0]:
             avisos.append(f"{nombre}: dos bloques de tasa baja {cxa:g}% CXA le quedan igual; usé el primero.")
         b = opciones[0][1]
@@ -422,9 +444,10 @@ def leer_boletin(datos, nombre=""):
             avisos.append(f"{nombre}: la tasa baja {cxa:g}% CXA dice «Eng {b['eng_titulo']:g}%» en el título y "
                           f"{eng:g}% en la columna; se usa el mayor.")
             eng = max(eng, b["eng_titulo"])
-        v["tasa_baja"].append(dict(eng=_entero(eng), cxa=_entero(cxa), baremo=_baremo(b), tasas=dict(b["tasas"])))
+        v["tasa_baja"].append(dict(eng=_entero(eng), cxa=_entero(cxa), baremo=_baremo(b), tasas=dict(b["tasas"]),
+                                   _serie=_serie))
     for nombre, v in vehiculos.items():
-        v["tasa_baja"].sort(key=lambda t: t["cxa"])
+        v["tasa_baja"].sort(key=lambda t: t.pop("_serie"))
         if v["bono"] and not v["tasa_baja"]:
             avisos.append(f"{nombre}: tiene bono pero no le encontré tasa baja.")
     for b in tasa_baja:
@@ -522,10 +545,11 @@ def a_tablas(oferta):
                       columns=["Auto", "Comisión %", "Enganche desde %", "Baremo"] + list(COL_PLAZO.values()))
     sis = _sistemas(oferta)
     colores = oferta.get("colores") or {}
-    pb = pd.DataFrame([{"Baremo": p["baremo"], "Comisión %": p["cxa"],
+    pb = pd.DataFrame([{"Baremo": p["baremo"], "Comisión %": p["cxa"], "Solo modelos": ", ".join(p.get("modelos") or []),
                         **{_col_min(s, colores): p["min"].get(str(s)) for s in sis}, **tasas(p["tasas"])}
                        for p in oferta.get("planes_bono") or []],
-                      columns=["Baremo", "Comisión %"] + [_col_min(s, colores) for s in sis] + list(COL_PLAZO.values()))
+                      columns=["Baremo", "Comisión %", "Solo modelos"] + [_col_min(s, colores) for s in sis]
+                      + list(COL_PLAZO.values()))
     ps = pd.DataFrame([{"Baremo": p["baremo"], "Comisión %": p["cxa"], "Enganche desde %": p["min"],
                         "Enganche hasta %": p.get("max"), **tasas(p["tasas"])}
                        for p in oferta.get("planes_sin_bono") or []],
@@ -533,7 +557,7 @@ def a_tablas(oferta):
     tablas = dict(autos=autos, tasa_baja=tb, lanzamiento=lz, planes_bono=pb, planes_sin_bono=ps)
     for df in tablas.values():          # números como float: las celdas vacías se ven vacías (no «None»)
         for c in df.columns:
-            if c not in ("Auto", "Baremo"):
+            if c not in ("Auto", "Baremo", "Solo modelos"):
                 df[c] = pd.to_numeric(df[c], errors="coerce").astype(float)
     return tablas
 
@@ -600,7 +624,11 @@ def de_tablas(tablas, generales):
         if not t:
             errores.append(f"Plan con bono {_txt(f.get('Baremo'))} sin tasas.")
             continue
-        planes_bono.append(dict(baremo=_txt(f.get("Baremo")), cxa=_n(f.get("Comisión %")) or 0, min=mins, tasas=t))
+        plan = dict(baremo=_txt(f.get("Baremo")), cxa=_n(f.get("Comisión %")) or 0, min=mins, tasas=t)
+        modelos = [_modelo(x) for x in re.split(r"[,;]", _txt(f.get("Solo modelos"))) if _modelo(x)]
+        if modelos:
+            plan["modelos"] = modelos
+        planes_bono.append(plan)
     planes_sin = []
     for f in tablas["planes_sin_bono"].to_dict("records"):
         t = tasas(f)
@@ -677,13 +705,12 @@ def cambios(antes, despues):
                 fa = f"${a.get(k) or 0:,.0f}" if k != "sistema" else f"{a.get(k)}%"
                 fb = f"${b.get(k) or 0:,.0f}" if k != "sistema" else f"{b.get(k)}%"
                 add(f"{n}: {nom}", fa, fb)
-        ta = {t["cxa"]: t for t in a.get("tasa_baja") or []}
-        tb = {t["cxa"]: t for t in b.get("tasa_baja") or []}
-        for c in sorted(set(ta) | set(tb)):
-            x, y = ta.get(c), tb.get(c)
-            fmt = lambda t: f"eng {t['eng']}% · {t['baremo']} · {_t(t['tasas'])}" if t else "—"
+        ta, tb = a.get("tasa_baja") or [], b.get("tasa_baja") or []      # se comparan en orden (1a, 2a serie)
+        for i in range(max(len(ta), len(tb))):
+            x, y = (ta[i] if i < len(ta) else None), (tb[i] if i < len(tb) else None)
+            fmt = lambda t: f"eng {t['eng']}% · {t['cxa']}% CXA · {t['baremo']} · {_t(t['tasas'])}" if t else "—"
             if x != y:
-                add(f"{n}: tasa baja {c}% CXA", fmt(x), fmt(y))
+                add(f"{n}: tasa baja {i + 1}", fmt(x), fmt(y))
         if a.get("lanzamiento") != b.get("lanzamiento"):
             fmt = lambda t: f"eng {t['eng']}% · {t['cxa']}% CXA · {t['baremo']} · {_t(t['tasas'])}" if t else "—"
             add(f"{n}: lanzamiento", fmt(a.get("lanzamiento")), fmt(b.get("lanzamiento")))
@@ -695,7 +722,9 @@ def cambios(antes, despues):
             if x == y:
                 continue
             if clave == "planes_bono":
-                fmt = lambda p: (f"{p['cxa']}% CXA · mínimos " + ", ".join(f"{s}%→{m}%" for s, m in p["min"].items())
+                fmt = lambda p: (f"{p['cxa']}% CXA · " + (f"solo {', '.join(p['modelos'])} · " if p.get("modelos")
+                                                          else "") + "mínimos "
+                                 + ", ".join(f"{s}%→{m}%" for s, m in p["min"].items())
                                  + f" · {_t(p['tasas'])}") if p else "—"
             else:
                 fmt = lambda p: (f"{p['cxa']}% CXA · enganche {p['min']}%" + (f" a <{p['max']}%" if p.get("max") else "")

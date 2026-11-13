@@ -44,6 +44,7 @@ import io
 import json
 import math
 import os
+import re
 from datetime import date, datetime
 from decimal import ROUND_HALF_DOWN, Decimal
 
@@ -88,7 +89,8 @@ def aplicar(oferta):
     pct = lambda x: float(x) / 100
     planes_bono = [dict(baremo=str(p["baremo"]), cxa=pct(p.get("cxa") or 0),
                         min={int(s): pct(m) for s, m in (p.get("min") or {}).items() if m not in (None, "")},
-                        tasas=_tasas(p["tasas"])) for p in o.get("planes_bono") or []]
+                        tasas=_tasas(p["tasas"]), modelos=[_modelo(m) for m in p.get("modelos") or []] or None)
+                   for p in o.get("planes_bono") or []]
     planes_sin = [dict(baremo=str(p["baremo"]), cxa=pct(p.get("cxa") or 0), min=pct(p.get("min") or 0),
                        max=pct(p["max"]) if p.get("max") else None, tasas=_tasas(p["tasas"]))
                   for p in o.get("planes_sin_bono") or []]
@@ -96,12 +98,12 @@ def aplicar(oferta):
     for nombre, v in (o.get("vehiculos") or {}).items():
         lz = v.get("lanzamiento")
         catalogo[nombre] = dict(
-            msrp=v.get("msrp") or None, bono=v.get("bono") or 0, color=v.get("sistema") or None,
+            modelo=_modelo_auto(nombre), msrp=v.get("msrp") or None, bono=v.get("bono") or 0, color=v.get("sistema") or None,
             tb=[dict(eng=t["eng"], cxa=pct(t.get("cxa") or 0), baremo=str(t["baremo"]), tasas=_tasas(t["tasas"]))
                 for t in v.get("tasa_baja") or []],
             lanz=(dict(eng=lz["eng"], cxa=pct(lz.get("cxa") or 0), baremo=str(lz["baremo"]), tasas=_tasas(lz["tasas"]))
                   if lz else None))
-    catalogo[OTRO] = dict(msrp=None, bono=0, color=None, tb=[], lanz=None)
+    catalogo[OTRO] = dict(modelo="", msrp=None, bono=0, color=None, tb=[], lanz=None)
     OFERTA, OFERTA_ID = o, huella(o)
     BOLETIN = o.get("boletin") or "boletín sin clave"
     OFERTA_MES = o.get("mes") or ""
@@ -113,6 +115,24 @@ def aplicar(oferta):
     ENGANCHE_MAX = pct(o.get("enganche_max") or 75)
     COLORES = {int(s): c for s, c in (o.get("colores") or {}).items()}
     PLANES_BONO, PLANES_SIN_BONO, CATALOGO = planes_bono, planes_sin, catalogo
+
+
+def _modelo(s):
+    """Modelo normalizado (igual que boletin_mg): «MGZS» = «ZS», «MG5» = «5», «New HS HEV» = «HSHEV»."""
+    s = re.sub(r"\bNEW\b", " ", str(s or "").upper())
+    s = re.sub(r"[^A-Z0-9]", "", s).replace("MG", "").replace("HYBRID", "HEV")
+    return s[:-2] if s.endswith("EV") and not s.endswith("HEV") else s
+
+
+def _modelo_auto(nombre):
+    """Modelo de un auto del catálogo: lo que va antes del año («MG5 2027 1.5L…» → 5)."""
+    m = re.match(r"(.*?)\s+20\d\d\b", nombre)
+    return _modelo(m.group(1) if m else nombre.split()[0])
+
+
+def planes_bono_de(v):
+    """Planes con bono que aplican al auto (algunos son solo para ciertos modelos, p. ej. «MG5 y ZS»)."""
+    return [p for p in PLANES_BONO if not p.get("modelos") or v.get("modelo") in p["modelos"]]
 
 
 def color_de(sistema):
@@ -132,7 +152,7 @@ def min_real_cliente(v, precio):
     """Enganche mínimo del cliente con el bono al enganche (el plan con bono de menor enganche), o None."""
     if not v["color"] or not precio:
         return None
-    mins = [m for p in PLANES_BONO if (m := min_color(p, v["color"])) is not None]
+    mins = [m for p in planes_bono_de(v) if (m := min_color(p, v["color"])) is not None]
     return (min(mins) if mins else v["color"] / 100) - v["bono"] / precio
 
 
@@ -143,7 +163,10 @@ def nombre_plan(plan, tipo):
         return f"Tasa Baja Eng {plan['eng']:g}% + {cxa}"
     if tipo == "lanz":
         return f"Lanzamiento {t:.2f}% + {cxa}"
-    return f"{'Especial' if plan['cxa'] else 'Estándar'} {t:.2f}% + {cxa}"
+    nombre = f"{'Especial' if plan['cxa'] else 'Estándar'} {t:.2f}% + {cxa}"
+    if plan.get("modelos"):             # plan solo para ciertos modelos («MG5 y ZS»)
+        nombre += " solo " + "/".join(f"MG{m}" if m[:1].isdigit() else m for m in plan["modelos"])
+    return nombre
 
 
 # ------------------------------------------------------------------------------------
@@ -165,7 +188,7 @@ def ofertas_para(v):
                         min=lz["eng"] / 100, max=None, tasas=dict(lz["tasas"])))
     if color:   # vehículo marcado en la tabla de bonos: cada plan con el bono al enganche y con el bono al precio
         for forma, modo in (("enganche", "flex_eng"), ("precio", "flex_precio")):
-            for p in PLANES_BONO:
+            for p in planes_bono_de(v):
                 mn = min_color(p, color)
                 if mn is None:
                     continue
@@ -435,7 +458,7 @@ def describir(vehiculo, precio, bono):
     if v["color"]:
         pct_b = bono / precio
         real = min_real_cliente(v, precio)
-        mins = ", ".join(f"{tasa1(p)} desde {min_color(p, v['color']):.0%}" for p in PLANES_BONO
+        mins = ", ".join(f"{tasa1(p)} desde {min_color(p, v['color']):.0%}" for p in planes_bono_de(v)
                          if min_color(p, v["color"]) is not None)
         txt = (f"Marcado en {color_de(v['color'])} en la tabla de bonos (enganche sistema {v['color']}%). Bono MG de "
                f"{money0(bono)} ({pct_b:.1%} del precio de lista {money0(precio)}), pagado 100% por MG Motors "
