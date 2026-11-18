@@ -233,6 +233,12 @@ def leer_boletin(datos, nombre=""):
             fin = dt.date(int(m.group(3)), MESES.index(_plano(m.group(2)).lower()) + 1, int(m.group(1)))
         except (ValueError, IndexError):
             pass
+    if fin and not inicio and boletin:     # «disponible hasta el 30 de noviembre»: inicia en la fecha del boletín
+        try:
+            d, mm, a = (int(x) for x in boletin.split("-")[1:4])
+            inicio = dt.date(a, mm, d) if dt.date(a, mm, d) <= fin else None
+        except (ValueError, TypeError):
+            pass
     m = re.search(r"enganchem[aá]ximo\D{0,80}?(\d{2})%", pegado, re.I)
     eng_max = int(m.group(1)) if m else 75
     if not m:
