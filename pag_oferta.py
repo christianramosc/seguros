@@ -144,6 +144,15 @@ if ranking:
     tarjeta(k[2], "", "Desembolso", om.money(ev["desembolso"]), om.desglose_desembolso(ev))
     tarjeta(k[3], "", "Tasa", f"{ev['tasa']:.2f}%", f"{ev['tasa_iva']:.2f}% con IVA · com. {op['cxa']:.0%}")
     tarjeta(k[4], "", "Plazo", f"{plazo} meses", f"Financiado {om.money0(ev['financiado'])}")
+    # lo que se captura en el cotizador de Autoexpress: baremo, enganche en pesos y en porcentaje
+    k2 = st.columns(3)
+    tarjeta(k2[0], "", "Baremo a utilizar", op["baremo"], op["nombre"], VERDE_T)
+    tarjeta(k2[1], "", "Enganche", om.money(ev["eng_total"]),
+            (f"cliente {om.money0(ev['eng_cliente'])} + bono {om.money0(ev['bono_eng'])}" if ev["bono_eng"]
+             else f"sobre precio {om.money0(ev['base'])}"))
+    tarjeta(k2[2], "", "Porcentaje de enganche", f"{ev['pct']:.2%}",
+            (f"cliente {ev['pct_cliente']:.2%} + bono {ev['pct'] - ev['pct_cliente']:.2%}" if ev["bono_eng"]
+             else f"mínimo del plan {op['min']:.0%}"))
     notas = [f"Total de mensualidades {om.money(ev['total'])}."]
     menor = min(ranking, key=lambda x: x[2]["mens"])
     if menor[1] is not op:
@@ -164,7 +173,7 @@ orden = {o["nombre"]: i for i, (_, o, _) in enumerate(ranking, 1)}
 filas = []
 for o in sorted(res["ops"], key=lambda o: orden.get(o["nombre"], 99)):
     e = res["evals"][o["nombre"]]
-    fila = {"#": str(orden.get(o["nombre"], "—")), "Oferta": o["nombre"],
+    fila = {"#": str(orden.get(o["nombre"], "—")), "Oferta": o["nombre"], "Baremo": o["baremo"],
             "Póliza año 1": om.texto_rango(res["rangos"][o["nombre"]])}
     if not e:
         filas.append(fila | {"Nota": "No maneja este plazo"})
@@ -172,21 +181,21 @@ for o in sorted(res["ops"], key=lambda o: orden.get(o["nombre"], 99)):
     fila |= {"Bono": e["forma"],
              "Precio": (f"{om.money0(e['precio_plan'])} (−{om.money0(e['bono_precio'])})" if e["bono_precio"]
                         else om.money0(e["precio_plan"])), "Pago inicial": e["pago_inicial"],
-             "Desembolso": e["desembolso"], "Enganche": f"{e['pct']:.1%}"}
+             "Desembolso": e["desembolso"], "Enganche": e["eng_total"], "Enganche %": f"{e['pct']:.2%}"}
     if e["valida"]:
         fila |= {"Mensualidad": e["mens"], "Mens. 13+": e["mens2"], "Tasa": f"{e['tasa']:.2f}%",
                  "Total": e["total"]}
     else:
         fila["Nota"] = e["motivo"]
     filas.append(fila)
-cols = ["#", "Oferta", "Mensualidad", "Mens. 13+", "Tasa", "Precio", "Pago inicial", "Desembolso", "Enganche",
-        "Bono", "Total", "Póliza año 1", "Nota"]
+cols = ["#", "Oferta", "Baremo", "Mensualidad", "Mens. 13+", "Tasa", "Precio", "Pago inicial", "Desembolso",
+        "Enganche", "Enganche %", "Bono", "Total", "Póliza año 1", "Nota"]
 df = pd.DataFrame(filas).reindex(columns=cols)
 if not MOSTRAR_SEGURO_2 or (not seguro_anual and not seguro1):
     df = df.drop(columns="Mens. 13+")
 if df["Nota"].isna().all():
     df = df.drop(columns="Nota")
-for c in ["Mensualidad", "Mens. 13+", "Pago inicial", "Desembolso", "Total"]:
+for c in ["Mensualidad", "Mens. 13+", "Pago inicial", "Desembolso", "Enganche", "Total"]:
     if c in df:
         df[c] = df[c].map(lambda x: om.money(x) if pd.notna(x) else None)
 df = df.fillna("—")
@@ -195,6 +204,8 @@ st.dataframe(df.style.apply(lambda r: [RESALTE if r["#"] == "1" else APAGADO if 
              hide_index=True, width="stretch",
              column_config={"#": st.column_config.TextColumn("#", width="small"), "Oferta": TEXTO_L("Oferta"),
                             "Precio": st.column_config.TextColumn("Precio", help="Con el bono al precio: precio de lista − bono"),
+                            "Enganche": st.column_config.TextColumn("Enganche", help="Enganche total (incluye el bono "
+                                                                    "cuando va al enganche)"),
                             "Nota": TEXTO_L("Nota")})
 nota("«Precio»: con el bono al precio, el precio de lista ya con el bono descontado (el enganche % se calcula sobre ese precio). "
      "«Póliza año 1»: rango del seguro con el que el plan cumple. En gris, los planes que no aplican.")
@@ -224,7 +235,7 @@ with t_plazo:
 with t_min:
     filas_min, valores = [], []
     for q in res["requisitos"]:
-        fila = {"Oferta": q["oferta"],
+        fila = {"Oferta": q["oferta"], "Baremo": q["baremo"],
                 "Precio": (f"{om.money0(q['precio_plan'])} (−{om.money0(q['bono_precio'])})" if q["bono_precio"]
                            else om.money0(q["precio_plan"])),
                 "Eng. sistema": f"{q['min_sistema']:.0%}" + (f" a <{q['min_max']:.0%}" if q["min_max"] else ""),
