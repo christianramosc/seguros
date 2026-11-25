@@ -295,8 +295,11 @@ def evaluar(op, n, d):
         eng_cli = (pago - s1c - d["gap_contado"] - c * (base - bono_eng + s1f + sa * anios)) / (1 - c)
         eng_tot = eng_cli + bono_eng
         cap = base - eng_tot
-        pct = eng_tot / base
-        pct_cli = eng_cli / base
+        # el % de enganche es sobre el valor a financiar antes del enganche: precio (− bono si va al precio) + GAP
+        # financiado + seguros financiados. El seguro de contado no entra ni al enganche ni a esta base.
+        base_eng = base + s1f + sa * anios
+        pct = eng_tot / base_eng
+        pct_cli = eng_cli / base_eng
         motivo = ""
         if eng_cli < 0:
             motivo = "El desembolso no alcanza para seguro y comisión"
@@ -320,7 +323,8 @@ def evaluar(op, n, d):
             if sa:
                 m2 = pm + round(pago_fijo(sa, ti, 12), 2) + vida_con_seguro(max(cap, 0), sa, n)
         total = m1 * min(n, 12) + (m2 * (n - 12) if m2 else 0)
-        r = dict(valida=not motivo, motivo=motivo, forma=forma, base=base, pct=pct, eng_cliente=eng_cli,
+        r = dict(valida=not motivo, motivo=motivo, forma=forma, base=base, base_eng=base_eng, seg_fin=s1f + sa * anios,
+                 pct=pct, eng_cliente=eng_cli,
                  pct_cliente=pct_cli,
                  bono_eng=bono_eng, eng_total=eng_tot, financiado=cap, monto_total=cap + s1f + sa * anios,
                  cxa=c * (cap + s1f + sa * anios), tasa=op["tasas"][n], tasa_iva=ti, pago_capital=pm, vida=vida1,
@@ -421,14 +425,17 @@ def requisito(op, d, n=None):
         bono_eng = 0.0
         cli_pct = op["min"]
         forma = "a la tasa (ya incluido)" if op["modo"] == "tasa" else "sin bono"
-    cli_monto = cli_pct * base
     n = n if n in op["tasas"] else max(op["tasas"])
     anios = n // 12 - 1
     c = op["cxa"] * (1 + IVA)
-    cap = base - cli_monto - bono_eng
     s1f = d["seguro_anual"] if d.get("s1_fin") else 0.0
     s1c = 0.0 if d.get("s1_fin") else d["seguro1"]
     sa = d["seguro_anual"] if d.get("resto_fin", True) else 0.0
+    # el mínimo es sobre precio + GAP financiado + seguros financiados (igual que en evaluar)
+    base_eng = base + s1f + sa * anios
+    cli_monto = op["min"] * base_eng - bono_eng
+    cli_pct = cli_monto / base_eng if base_eng else cli_pct
+    cap = base - cli_monto - bono_eng
     desembolso_min = cli_monto + s1c + d["gap_contado"] + c * (cap + s1f + sa * anios)
     return dict(oferta=op["nombre"], baremo=op["baremo"], cxa=op["cxa"], tasas=texto_tasas(op),
                 min_sistema=op["min"], min_max=op["max"], min_cliente=cli_pct, min_cliente_monto=cli_monto,
@@ -546,6 +553,16 @@ def texto_precio(ev):
     if ev.get("bono_precio"):
         return f"{money0(ev['precio_lista'])} − bono {money0(ev['bono_precio'])} = {money0(ev['precio_plan'])}"
     return money0(ev["precio_plan"])
+
+
+def texto_base(ev):
+    """Base del % de enganche: precio del plan + GAP financiado + seguros financiados."""
+    partes = [f"precio {money0(ev['precio_plan'])}"]
+    if ev["base"] - ev["precio_plan"] > 0.5:
+        partes.append(f"GAP {money0(ev['base'] - ev['precio_plan'])}")
+    if ev["seg_fin"]:
+        partes.append(f"seguro fin. {money0(ev['seg_fin'])}")
+    return " + ".join(partes) if len(partes) > 1 else partes[0]
 
 
 def desglose(ev):
@@ -687,7 +704,7 @@ def pdf_bytes(res, cliente=""):
                    texto_precio(ev) if ev["bono_precio"] else bono_txt.get(ev["forma"], "Sin bono")),
                   ("ENGANCHE", f"{money0(ev['eng_total'])}  ({ev['pct']:.1%})",
                    (f"cliente {money0(ev['eng_cliente'])} + bono {money0(ev['bono_eng'])}" if ev["bono_eng"] else
-                    f"sobre {money0(ev['base'])}")),
+                    f"sobre {money0(ev['base_eng'])}")),
                   ("MONTO FINANCIADO", money0(ev["financiado"]),
                    f"monto total a financiar {money0(ev['monto_total'])}" if ev["monto_total"] - ev["financiado"] > 1
                    else "sin seguros financiados"),

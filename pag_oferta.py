@@ -149,10 +149,10 @@ if ranking:
     tarjeta(k2[0], "", "Baremo a utilizar", op["baremo"], op["nombre"], VERDE_T)
     tarjeta(k2[1], "", "Enganche", om.money(ev["eng_total"]),
             (f"cliente {om.money0(ev['eng_cliente'])} + bono {om.money0(ev['bono_eng'])}" if ev["bono_eng"]
-             else f"sobre precio {om.money0(ev['base'])}"))
+             else f"sin seguro de contado · sobre {om.money0(ev['base_eng'])}"))
     tarjeta(k2[2], "", "Porcentaje de enganche", f"{ev['pct']:.2%}",
             (f"cliente {ev['pct_cliente']:.2%} + bono {ev['pct'] - ev['pct_cliente']:.2%}" if ev["bono_eng"]
-             else f"mínimo del plan {op['min']:.0%}"))
+             else f"mínimo del plan {op['min']:.0%}") + " · base: " + om.texto_base(ev))
     notas = [f"Total de mensualidades {om.money(ev['total'])}."]
     menor = min(ranking, key=lambda x: x[2]["mens"])
     if menor[1] is not op:
