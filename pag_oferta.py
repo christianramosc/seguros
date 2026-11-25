@@ -9,8 +9,8 @@ el bono cuando va al enganche. Desembolso del cliente = pago inicial − bono al
 Orden de la página: datos de la operación → mejor opción (tarjetas) → tabla con todos los planes → pestañas «Por
 plazo», «Mínimos por plan» y «Oferta del auto» → descargas (PDF del análisis y PDF de mínimos).
 
-Por ahora sin GAP (faltan los precios actualizados) ni seguro de los años 2+: se activan con MOSTRAR_GAP y
-MOSTRAR_SEGURO_2.
+GAP con los montos del cotizador por rango de precio y plan (MOSTRAR_GAP). El seguro de los años 2+ sigue oculto
+(MOSTRAR_SEGURO_2).
 """
 import datetime as dt
 import re
@@ -26,7 +26,7 @@ from ui import APAGADO, RESALTE, VERDE_T, hero, insignias, nota, seccion, tarjet
 om = oferta_guardada.motor()
 VERSION = f"{om._mtime}-{om.OFERTA_ID}"     # llave de los cachés: cambia con el código o con la oferta
 
-MOSTRAR_GAP = False        # desactivado hasta tener los precios de GAP actualizados
+MOSTRAR_GAP = True         # montos de GAP por rango de precio y plan (oferta_mg.TABLA_GAP, cotizador nov-2026)
 MOSTRAR_SEGURO_2 = False   # seguro de los años 2+ oculto: la mensualidad no lo incluye
 
 D = lambda t: str(t).replace("$", "\\$")   # en markdown, «$» abre fórmulas
@@ -44,7 +44,7 @@ autos = list(om.CATALOGO)
 CAPTURAS = ("Desembolso", "Pago inicial")
 st.session_state.setdefault("of_pago", 130000)
 st.session_state.setdefault("of_pi", 0)
-seguro_anual, resto_fin, gap_modo, gap_monto = 0.0, False, "No", 0.0
+seguro_anual, resto_fin, gap_modo, gap_monto, gap_plan = 0.0, True, "No", 0.0, om.GAP_PLAN_DEFAULT   # años 2+ fraccionados, como el cotizador
 with st.container(border=True):
     a1, a2 = st.columns([3, 1], vertical_alignment="bottom")
     if st.session_state.get("of_veh") not in autos:      # el auto ya no está en la oferta nueva
@@ -79,24 +79,37 @@ with st.container(border=True):
                                  format_func=lambda n: f"{n} m") or 60
 
     c1, c2, c3 = st.columns([1, 1.3, 1.7], vertical_alignment="bottom")
-    seguro1 = c1.number_input("Seguro año 1", min_value=0.0, value=0.0, step=500.0, key="of_seg",
-                              help="Importe primer año. En 0 si aún no lo tienes: la tabla dice hasta cuánto puede "
-                                   "valer.")
-    seguro1_fin = (c2.segmented_control("Pago del seguro", ["Contado", "Financiado"], default="Contado",
-                                        key="of_seg1_modo",
-                                        help="Contado: va en el pago inicial. Financiado (multianual fraccionado): "
-                                             "se amortiza en los meses 1-12 y paga comisión.")
-                   or "Contado") == "Financiado"
+    modo_seg = (c2.segmented_control("Pago del seguro", ["Contado", "Fraccionado", "Multianual"], default="Contado",
+                                     key="of_seg1_modo",
+                                     help="Como en el cotizador (Contratación Autoexpress). Contado: el año 1 va en el "
+                                          "pago inicial. Fraccionado (Financiado · Fraccionado): la prima anual se "
+                                          "amortiza en 12 meses cada año. Multianual (Financiado · Multianual): la "
+                                          "prima de todos los años se suma al capital y se paga en todo el plazo.")
+                or "Contado")
+    seguro1 = c1.number_input("Prima multianual (todos los años)" if modo_seg == "Multianual" else "Seguro año 1",
+                              min_value=0.0, value=0.0, step=500.0, key="of_seg",
+                              help="Importe del cotizador (en Multianual, la prima «calculada a N años»). En 0 si aún "
+                                   "no lo tienes: la tabla dice hasta cuánto puede valer.")
+    seguro1_fin = modo_seg == "Fraccionado"
+    seguro_multi = modo_seg == "Multianual"
     if MOSTRAR_SEGURO_2:
         seguro_anual = c3.number_input("Seguro anual (años 2+)", min_value=0.0, value=0.0, step=500.0,
                                        key="of_seg_anual", help="En 0 = igual al año 1.")
         resto_fin = (c3.segmented_control("Seguro años 2+", ["Financiado", "Contado"], default="Financiado",
                                           key="of_seg2_modo") or "Financiado") == "Financiado"
-    if MOSTRAR_GAP:
-        gap_modo = c3.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap") or "No"
-        gap_monto = c3.number_input("Monto GAP", min_value=0.0, value=0.0, step=100.0, key="of_gap_monto",
-                                    disabled=gap_modo == "No")
     iva = c3.toggle("IVA sobre intereses", value=True, key="of_iva")
+    if MOSTRAR_GAP:
+        g1, g2, g3 = st.columns([1.3, 1.3, 1.4], vertical_alignment="bottom")
+        gap_modo = g1.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap") or "No"
+        gap_plan = g2.selectbox("Plan GAP", om.GAP_PLANES, index=om.GAP_PLANES.index(om.GAP_PLAN_DEFAULT),
+                                key="of_gap_plan", disabled=gap_modo == "No")
+        tabla = om.monto_gap(float(precio_manual or v["msrp"] or 0), gap_plan)
+        gap_monto = g3.number_input("Monto GAP", min_value=0.0, value=0.0, step=100.0, key="of_gap_monto",
+                                    disabled=gap_modo == "No",
+                                    help="0 = el de la tabla del cotizador para el precio y el plan.")
+        if gap_modo != "No":
+            nota(f"GAP {gap_plan}: {om.money0(tabla)} según el precio del auto." if tabla else
+                 "Sin GAP para este precio (el cotizador lo da hasta $2,000,000): captura el monto.")
 
 if om.requiere_precio(veh) and not precio_manual:
     st.markdown('<div class="vacio"><b>Captura el precio del auto</b><br>'
@@ -126,7 +139,7 @@ def pdf(version, a, cliente):
 
 args = (veh, float(pago), float(seguro1), float(seguro_anual), int(plazo), float(precio_manual), gap_modo, iva,
         float(pago_inicial) if captura == "Pago inicial" else 0.0, seguro1_fin, resto_fin,
-        float(gap_monto) if gap_modo != "No" else 0.0)
+        float(gap_monto) if gap_modo != "No" else 0.0, seguro_multi, gap_plan)
 res = correr(VERSION, *args)
 ranking = res["ranking"]
 
@@ -160,10 +173,21 @@ if ranking:
                      f"{om.money(menor[0] - ranking[0][0])} más en total.")
     if not seguro1:
         notas.append("Seguro en $0: todo va a enganche; la columna «Póliza año 1» dice hasta cuánto puede valer.")
-    if seguro1_fin:
+    if seguro1_fin or seguro_multi:
         notas.append("Seguro financiado: no va en el pago inicial y paga comisión.")
     for t in notas:
         nota(t)
+
+    # ------------------------------------------------------------------------- captura en el cotizador
+    seccion("Captura en el cotizador", "valores exactos para CreditoClick con la mejor opción")
+    cap = pd.DataFrame(om.captura_cotizador(res, op, ev), columns=["Sección", "Campo", "Valor"])
+    st.dataframe(cap, hide_index=True, width="stretch",
+                 column_config={"Sección": st.column_config.TextColumn("Sección", width="small"),
+                                "Campo": st.column_config.TextColumn("Campo", width="medium"),
+                                "Valor": TEXTO_L("Valor")})
+    nota("Captura en este orden: vehículo → GAP → enganche en $ → plan → plazo → seguro. Si cambias el enganche, el "
+         "plan o el GAP, el cotizador borra el seguro: vuelve a elegirlo. La mensualidad del resumen incluye seguro de "
+         "vida (y el seguro fraccionado/multianual); la tabla de abajo del cotizador suma además desempleo.")
 else:
     st.warning(f"Ninguna oferta es válida a {plazo} meses con este {captura.lower()}.")
 
