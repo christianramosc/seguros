@@ -227,12 +227,19 @@ GAP_AYUDA = ("GAP RTI (valor factura): en pérdida total o robo total paga la di
              "de cobertura amplia.")
 
 
+def gap_anios(plan):
+    """Años a valor factura con el GAP: el seguro amplio paga el año 1 (o 1 y 2) y el GAP los años del plan."""
+    if "3 y 4" in plan:
+        return "4 años a valor factura (si la póliza paga valor factura los años 1 y 2)"
+    return "3 años a valor factura (año 1 el seguro amplio, años 2 y 3 el GAP)"
+
+
 def gap_aviso(plan):
     """Recordatorio corto para el plan de GAP elegido: (es_alerta, texto)."""
     if "3 y 4" in plan:
         return True, ("RTI 3 y 4 cubre los años 3 y 4: con seguro Amplia (valor factura solo el 1er año) el año 2 "
                       "queda descubierto. Usa un RTI 2 y 3, salvo que la póliza pague valor factura 2 años.")
-    return False, "Seguro de cobertura amplia (valor factura el 1er año) + GAP RTI 2 y 3: cubre del año 1 al 3."
+    return False, "Requiere seguro de cobertura amplia (valor factura el 1er año)."
 TABLA_GAP = [   # (precio_hasta, {plan: monto})
     (300000, {"Básico RTI 2 y 3": 8250, "Estándar RTI 3 y 4": 7370, "Plus RTI 3 y 4": 9680, "Ultra RTI 2 y 3": 10560}),
     (450000, {"Básico RTI 2 y 3": 11770, "Estándar RTI 3 y 4": 10890, "Plus RTI 3 y 4": 13530,
@@ -578,6 +585,7 @@ def captura_cotizador(res, op, ev):
         plan_g = res.get("gap_plan", GAP_PLAN_DEFAULT)
         add("Vehículo", "Seguro GAP", f"Con GAP · Plan {plan_g.upper()} · {modo} (importe {money(res['gap'])})"
             + (" ⚠ año 2 sin valor factura con Amplia" if "3 y 4" in plan_g else ""))
+        add("Vehículo", "Valor factura", gap_anios(plan_g))
     else:
         add("Vehículo", "Seguro GAP", "Sin GAP")
     add("Vehículo", "Importe total del vehículo (lo calcula)", money(ev["base"]))
