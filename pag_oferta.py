@@ -98,13 +98,15 @@ with st.container(border=True):
                               min_value=0.0, value=0.0, step=500.0, key="of_seg",
                               help="La prima de la aseguradora que elijas en el cotizador (Multianual: «calculada a "
                                    "N años»). En 0 si aún no la tienes: el comparativo dice hasta cuánto puede valer.")
-    gap_modo = c3.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap") or "No"
+    gap_modo = c3.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap", help=om.GAP_AYUDA) or "No"
     gap_plan = c4.selectbox("Plan GAP", om.GAP_PLANES, index=om.GAP_PLANES.index(om.GAP_PLAN_DEFAULT),
                             key="of_gap_plan", disabled=gap_modo == "No")
     if gap_modo != "No":   # monto de la tabla del cotizador (rango del precio de lista × plan)
         monto = om.monto_gap(precio_lista, gap_plan)
         insignias([f"GAP {gap_plan} {gap_modo.lower()}: {om.money0(monto)}" if monto else
                    "Sin GAP para este precio (el cotizador lo da hasta $2,000,000)"])
+        alerta, texto = om.gap_aviso(gap_plan)
+        st.warning(texto, icon=":material/warning:") if alerta else nota(texto)
 seguro1_fin, seguro_multi = modo_seg == "Fraccionado", modo_seg == "Multianual"
 
 if om.requiere_precio(veh) and not precio_manual:
