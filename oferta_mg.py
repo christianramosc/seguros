@@ -280,9 +280,15 @@ def evaluar(op, n, d):
     precio, gap, bono = d["precio"], d["gap"], d["bono"]
     # Año 1 financiado = «Autoexpress Multianual Fraccionado»: el importe primer año de la cotización es $0 y el
     # importe anual se financia también en el año 1 (12 meses), igual que en los años 2+.
-    s1f = d["seguro_anual"] if d.get("s1_fin") else 0.0           # seguro año 1 financiado
-    s1c = 0.0 if d.get("s1_fin") else d["seguro1"]                # seguro año 1 de contado (pago inicial)
-    sa = d["seguro_anual"] if d.get("resto_fin", True) else 0.0   # seguro años 2+ financiado
+    # «Financiado multianual»: la prima de todos los años (la que da el cotizador «a N años») se suma al capital y
+    # se paga a la tasa del crédito en todo el plazo (mensualidad fija). Validado nov-2026: MG5 Excite AT, 30%,
+    # 60 m, Qualitas $82,996.17 → financiado $347,596.17, mensualidad $9,900.53.
+    smul = d["seguro1"] if d.get("s_multi") else 0.0
+    multi = bool(smul)
+    s1f = d["seguro_anual"] if d.get("s1_fin") and not multi else 0.0   # seguro año 1 financiado (fraccionado)
+    s1c = 0.0 if d.get("s1_fin") or multi else d["seguro1"]             # seguro año 1 de contado (pago inicial)
+    sa = d["seguro_anual"] if d.get("resto_fin", True) and not multi else 0.0   # seguro años 2+ financiado
+    extra = s1f + sa * anios + smul           # seguros financiados (la comisión también se cobra sobre ellos)
     if op["modo"] == "flex_eng":
         candidatos = [("al enganche", precio + gap, bono)]
     elif op["modo"] == "flex_precio":
@@ -292,7 +298,7 @@ def evaluar(op, n, d):
     primero = None
     for forma, base, bono_eng in candidatos:
         pago = d["pago_inicial"] - bono_eng if d.get("pago_inicial") else d["pago"]
-        eng_cli = (pago - s1c - d["gap_contado"] - c * (base - bono_eng + s1f + sa * anios)) / (1 - c)
+        eng_cli = (pago - s1c - d["gap_contado"] - c * (base - bono_eng + extra)) / (1 - c)
         eng_tot = eng_cli + bono_eng
         cap = base - eng_tot
         pct = eng_tot / base
@@ -309,8 +315,11 @@ def evaluar(op, n, d):
         elif cap <= 0:
             motivo = "No queda monto a financiar"
         ti = tasa_con_iva(op["tasas"][n], d["iva"])
-        pm = round(pago_fijo(max(cap, 0), ti, n), 2)
-        vida1 = vida_capital(max(cap, 0), n)
+        pm = round(pago_fijo(max(cap, 0) + smul, ti, n), 2)
+        # vida: 4.1% del capital si solo se financia el auto; con GAP o seguro multianual financiados, VIDA_TOTAL del total
+        # (validado nov-2026: con GAP $13,530 financiado, $278,130 a 60 m → vida $189.59).
+        vida1 = (round(VIDA_TOTAL * (max(cap, 0) + smul) / n, 2) if (d["gap"] or multi)
+                 else vida_capital(max(cap, 0), n))
         m1 = pm + vida1
         if s1f:   # seguro año 1 financiado (multianual fraccionado): se amortiza en los meses 1-12
             m1 = pm + round(pago_fijo(s1f, ti, 12), 2) + vida_con_seguro(max(cap, 0), s1f, n)
@@ -322,14 +331,14 @@ def evaluar(op, n, d):
         total = m1 * min(n, 12) + (m2 * (n - 12) if m2 else 0)
         r = dict(valida=not motivo, motivo=motivo, forma=forma, base=base, pct=pct, eng_cliente=eng_cli,
                  pct_cliente=pct_cli,
-                 bono_eng=bono_eng, eng_total=eng_tot, financiado=cap, monto_total=cap + s1f + sa * anios,
-                 cxa=c * (cap + s1f + sa * anios), tasa=op["tasas"][n], tasa_iva=ti, pago_capital=pm, vida=vida1,
+                 bono_eng=bono_eng, eng_total=eng_tot, financiado=cap, monto_total=cap + extra,
+                 cxa=c * (cap + extra), tasa=op["tasas"][n], tasa_iva=ti, pago_capital=pm, vida=vida1,
                  mens=m1, mens2=m2, total=total, plazo=n, seguro1=s1c, seguro1_fin=s1f, gap_contado=d["gap_contado"],
-                 resto_fin=bool(sa), aprox_vida=bool(s1f),
+                 resto_fin=bool(sa), aprox_vida=bool(s1f), seguro_multi=smul,
                  # precio del plan: con el bono al precio, el precio de lista menos el bono
                  precio_lista=precio, bono_precio=bono if forma == "al precio" else 0.0,
                  precio_plan=precio - (bono if forma == "al precio" else 0.0),
-                 desembolso=pago, pago_inicial=eng_tot + c * (cap + s1f + sa * anios) + s1c + d["gap_contado"])
+                 desembolso=pago, pago_inicial=eng_tot + c * (cap + extra) + s1c + d["gap_contado"])
         if r["valida"]:
             return r
         primero = primero or r
@@ -426,10 +435,12 @@ def requisito(op, d, n=None):
     anios = n // 12 - 1
     c = op["cxa"] * (1 + IVA)
     cap = base - cli_monto - bono_eng
-    s1f = d["seguro_anual"] if d.get("s1_fin") else 0.0
-    s1c = 0.0 if d.get("s1_fin") else d["seguro1"]
-    sa = d["seguro_anual"] if d.get("resto_fin", True) else 0.0
-    desembolso_min = cli_monto + s1c + d["gap_contado"] + c * (cap + s1f + sa * anios)
+    multi = bool(d.get("s_multi"))
+    s1f = d["seguro_anual"] if d.get("s1_fin") and not multi else 0.0
+    s1c = 0.0 if d.get("s1_fin") or multi else d["seguro1"]
+    sa = d["seguro_anual"] if d.get("resto_fin", True) and not multi else 0.0
+    smul = d["seguro1"] if multi else 0.0
+    desembolso_min = cli_monto + s1c + d["gap_contado"] + c * (cap + s1f + sa * anios + smul)
     return dict(oferta=op["nombre"], baremo=op["baremo"], cxa=op["cxa"], tasas=texto_tasas(op),
                 min_sistema=op["min"], min_max=op["max"], min_cliente=cli_pct, min_cliente_monto=cli_monto,
                 bono=forma, precio_plan=precio - (bono if forma == "al precio" else 0.0),
@@ -483,7 +494,7 @@ GAP_MODOS = ("No", "Contado", "Financiado")
 
 
 def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_manual=0.0, gap_modo="No",
-             iva=True, pago_inicial=0.0, seguro1_fin=False, resto_fin=True, gap_monto=0.0):
+             iva=True, pago_inicial=0.0, seguro1_fin=False, resto_fin=True, gap_monto=0.0, seguro_multi=False):
     """pago = desembolso del cliente: lo que pone de su bolsa (pago inicial − bono al enganche).
     pago_inicial: si se captura (> 0) manda sobre `pago`: es el pago inicial de la cotización y el desembolso de cada
     plan sale de él (− bono al enganche si el plan lo lleva).
@@ -503,7 +514,7 @@ def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_man
              gap_contado=gap if gap_modo == "Contado" else 0.0, bono=v["bono"], pago=pago_inicial or pago,
              pago_inicial=pago_inicial or 0.0, seguro1=seguro1 or 0.0,
              seguro_anual_capturado=seguro_anual or 0.0, seguro_anual=(seguro_anual or seguro1 or 0.0), iva=iva,
-             s1_fin=bool(seguro1_fin), resto_fin=bool(resto_fin))
+             s1_fin=bool(seguro1_fin), resto_fin=bool(resto_fin), s_multi=bool(seguro_multi))
     ops = ofertas_para(v)
     evals = {o["nombre"]: evaluar(o, plazo, d) for o in ops}
     ranking = sorted([(ev["total"], o, ev) for o in ops if (ev := evals[o["nombre"]]) and ev["valida"]],
@@ -515,7 +526,7 @@ def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_man
                 pago=(ranking[0][2]["desembolso"] if ranking else pago) if pago_inicial else pago,
                 pago_inicial=pago_inicial or 0.0, tope_seguro=tope_seguro(d), seguro=d["seguro1"],
                 seguro_anual=d["seguro_anual"], seguro_anual_estimado=not seguro_anual and bool(seguro1),
-                seguro1_fin=bool(seguro1_fin), resto_fin=bool(resto_fin),
+                seguro1_fin=bool(seguro1_fin), resto_fin=bool(resto_fin), seguro_multi=bool(seguro_multi),
                 plazo=plazo, iva=iva, ops=ops, evals=evals, ranking=ranking, matriz=matriz, mejores=mejores,
                 rangos=rangos,
                 color=COLORES.get(v["color"]), descripcion=describir(vehiculo, precio, v["bono"]),
@@ -553,7 +564,7 @@ def desglose(ev):
     partes = [f"eng. {money0(ev['eng_total'])}"]
     if ev["cxa"]:
         partes.append(f"com. {money0(ev['cxa'])}")
-    if ev["seguro1"] or not ev["seguro1_fin"]:
+    if ev["seguro1"] or not (ev["seguro1_fin"] or ev.get("seguro_multi")):
         partes.append(f"seguro {money0(ev['seguro1'])}")
     if ev["gap_contado"]:
         partes.append(f"GAP {money0(ev['gap_contado'])}")
@@ -565,7 +576,7 @@ def desglose_desembolso(ev):
     partes = [f"eng. propio {money0(ev['eng_cliente'])} ({ev['pct_cliente']:.1%})"]
     if ev["cxa"]:
         partes.append(f"com. {money0(ev['cxa'])}")
-    if ev["seguro1"] or not ev["seguro1_fin"]:
+    if ev["seguro1"] or not (ev["seguro1_fin"] or ev.get("seguro_multi")):
         partes.append(f"seguro {money0(ev['seguro1'])}")
     if ev["gap_contado"]:
         partes.append(f"GAP {money0(ev['gap_contado'])}")
@@ -653,7 +664,8 @@ def pdf_bytes(res, cliente=""):
     if cliente.strip():
         linea.insert(0, f"Cliente: <b>{cliente.strip()}</b>")
     story += [P(" · ".join(linea), s_sub), Spacer(1, 8)]
-    seg_txt = (f"{money(seguro)} " + ("financiado" if res.get("seguro1_fin") else "de contado")) if seguro else \
+    seg_txt = (f"{money(seguro)} " + ("multianual financiado" if res.get("seguro_multi") else "financiado"
+                                      if res.get("seguro1_fin") else "de contado")) if seguro else \
         "por definir"
     datos = [("PRECIO DE LISTA", money0(res["precio"])), ("BONO MG", money0(res["bono"]) if res["bono"] else "Sin bono"),
              ("SEGURO AÑO 1", seg_txt), ("PLAZO", f"{plazo} meses")]

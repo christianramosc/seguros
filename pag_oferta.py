@@ -44,7 +44,7 @@ autos = list(om.CATALOGO)
 CAPTURAS = ("Desembolso", "Pago inicial")
 st.session_state.setdefault("of_pago", 130000)
 st.session_state.setdefault("of_pi", 0)
-seguro_anual, resto_fin, gap_modo, gap_monto = 0.0, False, "No", 0.0
+seguro_anual, resto_fin, gap_modo, gap_monto = 0.0, True, "No", 0.0   # años 2+ fraccionados, como el cotizador
 with st.container(border=True):
     a1, a2 = st.columns([3, 1], vertical_alignment="bottom")
     if st.session_state.get("of_veh") not in autos:      # el auto ya no está en la oferta nueva
@@ -79,14 +79,19 @@ with st.container(border=True):
                                  format_func=lambda n: f"{n} m") or 60
 
     c1, c2, c3 = st.columns([1, 1.3, 1.7], vertical_alignment="bottom")
-    seguro1 = c1.number_input("Seguro año 1", min_value=0.0, value=0.0, step=500.0, key="of_seg",
-                              help="Importe primer año. En 0 si aún no lo tienes: la tabla dice hasta cuánto puede "
-                                   "valer.")
-    seguro1_fin = (c2.segmented_control("Pago del seguro", ["Contado", "Financiado"], default="Contado",
-                                        key="of_seg1_modo",
-                                        help="Contado: va en el pago inicial. Financiado (multianual fraccionado): "
-                                             "se amortiza en los meses 1-12 y paga comisión.")
-                   or "Contado") == "Financiado"
+    modo_seg = (c2.segmented_control("Pago del seguro", ["Contado", "Fraccionado", "Multianual"], default="Contado",
+                                     key="of_seg1_modo",
+                                     help="Como en el cotizador (Contratación Autoexpress). Contado: el año 1 va en el "
+                                          "pago inicial. Fraccionado (Financiado · Fraccionado): la prima anual se "
+                                          "amortiza en 12 meses cada año. Multianual (Financiado · Multianual): la "
+                                          "prima de todos los años se suma al capital y se paga en todo el plazo.")
+                or "Contado")
+    seguro1 = c1.number_input("Prima multianual (todos los años)" if modo_seg == "Multianual" else "Seguro año 1",
+                              min_value=0.0, value=0.0, step=500.0, key="of_seg",
+                              help="Importe del cotizador (en Multianual, la prima «calculada a N años»). En 0 si aún "
+                                   "no lo tienes: la tabla dice hasta cuánto puede valer.")
+    seguro1_fin = modo_seg == "Fraccionado"
+    seguro_multi = modo_seg == "Multianual"
     if MOSTRAR_SEGURO_2:
         seguro_anual = c3.number_input("Seguro anual (años 2+)", min_value=0.0, value=0.0, step=500.0,
                                        key="of_seg_anual", help="En 0 = igual al año 1.")
@@ -126,7 +131,7 @@ def pdf(version, a, cliente):
 
 args = (veh, float(pago), float(seguro1), float(seguro_anual), int(plazo), float(precio_manual), gap_modo, iva,
         float(pago_inicial) if captura == "Pago inicial" else 0.0, seguro1_fin, resto_fin,
-        float(gap_monto) if gap_modo != "No" else 0.0)
+        float(gap_monto) if gap_modo != "No" else 0.0, seguro_multi)
 res = correr(VERSION, *args)
 ranking = res["ranking"]
 
@@ -160,7 +165,7 @@ if ranking:
                      f"{om.money(menor[0] - ranking[0][0])} más en total.")
     if not seguro1:
         notas.append("Seguro en $0: todo va a enganche; la columna «Póliza año 1» dice hasta cuánto puede valer.")
-    if seguro1_fin:
+    if seguro1_fin or seguro_multi:
         notas.append("Seguro financiado: no va en el pago inicial y paga comisión.")
     for t in notas:
         nota(t)
