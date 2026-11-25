@@ -177,6 +177,17 @@ if ranking:
         notas.append("Seguro financiado: no va en el pago inicial y paga comisión.")
     for t in notas:
         nota(t)
+
+    # ------------------------------------------------------------------------- captura en el cotizador
+    seccion("Captura en el cotizador", "valores exactos para CreditoClick con la mejor opción")
+    cap = pd.DataFrame(om.captura_cotizador(res, op, ev), columns=["Sección", "Campo", "Valor"])
+    st.dataframe(cap, hide_index=True, width="stretch",
+                 column_config={"Sección": st.column_config.TextColumn("Sección", width="small"),
+                                "Campo": st.column_config.TextColumn("Campo", width="medium"),
+                                "Valor": TEXTO_L("Valor")})
+    nota("Captura en este orden: vehículo → GAP → enganche en $ → plan → plazo → seguro. Si cambias el enganche, el "
+         "plan o el GAP, el cotizador borra el seguro: vuelve a elegirlo. La mensualidad del resumen incluye seguro de "
+         "vida (y el seguro fraccionado/multianual); la tabla de abajo del cotizador suma además desempleo.")
 else:
     st.warning(f"Ninguna oferta es válida a {plazo} meses con este {captura.lower()}.")
 

@@ -472,6 +472,126 @@ def mens_minimo(op, d):
     return salida
 
 
+# ------------------------------------------------------------------------------------
+# Captura en el cotizador de Autoexpress (CreditoClick)
+# ------------------------------------------------------------------------------------
+# Catálogo del cotizador (Marca MG MOTOR, nov-2026): (año, modelo, versión, precio con IVA). El auto del boletín se
+# ubica por año y precio de lista.
+COTIZADOR_VEHICULOS = [
+    ("2027", "MG5", "EXCITE MT", 344000), ("2027", "MG5", "EXCITE AT", 378000), ("2027", "MG5", "ELEGANCE AT", 399000),
+    ("2027", "MG5", "STYLE", 299900), ("2027", "NUEVA HS HEV", "1.5L LUX PREMIER HYBRID AT", 689900),
+    ("2027", "ZS", "1.5T LUX TURBO ELEGANCE AT", 490000), ("2027", "ZS", "1.5T COM TURBO EXCITE CVT", 399900),
+    ("2027", "ZS", "HEV LUX ELEGANCE", 580000), ("2027", "MG3", "1.5L STD COOL MT", 249000),
+    ("2027", "MG3", "1.5L COM STYLE MT", 306000), ("2027", "MG3", "1.5L COM STYLE AT", 324000),
+    ("2027", "MG3", "1.5L DEL EXCITE AT", 364000), ("2027", "NEW HS PHEV", "1.5T TURBO TROPHY PHEV AT", 779900),
+    ("2026", "MG3", "1.5L HEV EXCITE", 422000), ("2026", "MG3", "1.5L HEV ELEGANCE", 464000),
+    ("2026", "MG3", "COOL MT", 249000), ("2026", "MG3", "1.5L STYLE MT", 306000), ("2026", "MG3", "1.5L STYLE CVT", 324000),
+    ("2026", "MG3", "1.5L EXCITE CVT", 364000), ("2026", "MG5", "STYLE", 299900), ("2026", "MG5", "EXCITE MT", 344000),
+    ("2026", "MG5", "EXCITE AT", 378000), ("2026", "MG5", "ELEGANCE AT", 399000), ("2026", "MG7", "PREMIER AT", 629000),
+    ("2026", "MG7", "TROPHY AT", 697000), ("2026", "MG7", "TROPHY RED AT", 718000),
+    ("2026", "NEW HS", "1.5T COM EXCITE DCT", 599900), ("2026", "NEW HS", "2.0T LUX TROPHY AT", 659900),
+    ("2026", "NEW HS", "HEV EXCITE", 619900), ("2026", "NEW HS", "HEV PREMIER", 689900),
+    ("2026", "NEW HS PHEV", "1.5T TURBO EXCITE PHEV AT", 714900), ("2026", "NEW HS PHEV", "1.5T TURBO TROPHY PHEV AT", 779900),
+    ("2026", "NEW ZS", "HEV ELEGANCE", 580000), ("2026", "NEW ZS", "HEV EXCITE", 545000),
+    ("2026", "NEW ZS", "1.5T LUX TURBO ELEGANCE AT", 490000), ("2026", "NEW ZS", "1.5T COM TURBO EXCITE AT", 399900),
+    ("2026", "MG4", "EXTENDED RANGE", 609000),
+    ("2025", "MG4", "EXTENDED RANGE", 609000), ("2025", "MG4", "STYLE", 499000), ("2025", "MG4", "X-POWER 4WD", 714900),
+    ("2025", "RX9", "2.0T ELEGANCE AT", 777000), ("2025", "RX9", "2.0T PREMIER AT", 869900),
+    ("2025", "NEW ZS", "HEV ELEGANCE", 574900), ("2025", "NEW ZS", "HEV EXCITE", 539900),
+    ("2025", "NEW ZS", "TURBO ELEGANCE", 484900),
+]
+
+# Cómo se llama cada plan en la lista «Plan» del cotizador (nov-2026, «MM-AA» = mes-año de la oferta). Se usa la
+# versión sin «UNI» ni «P DIF». Los de Tasa Baja traen el baremo PF al final.
+COTIZADOR_PLAN_ESTANDAR = {   # tasa base del plan → clave al final del nombre
+    13.74: "MG 30% ENG 0% CXA MM-AA PF M0002",
+    17.74: "MG 0% CXA MM-AA PF M0003",
+    12.09: "12.09% MG 35% ENG MM-AA PF M0007",
+}
+
+
+def vehiculo_cotizador(vehiculo, precio=None):
+    """(año, modelo, versión) del cotizador para el auto del boletín, o None si no se ubica."""
+    m = re.search(r"\b(20\d\d)\b", vehiculo)
+    precio = precio or (CATALOGO.get(vehiculo) or {}).get("msrp")
+    if not m or not precio:
+        return None
+    hits = [c for c in COTIZADOR_VEHICULOS if c[0] == m.group(1) and abs(c[3] - precio) < 1]
+    if len(hits) > 1:   # mismo precio en dos modelos: el que comparte palabra con el nombre
+        nombre = vehiculo.upper().replace("MGZS", "ZS")
+        hits = [c for c in hits if c[1].replace("NEW ", "").replace("NUEVA ", "").split()[0] in nombre] or hits
+    return hits[0][:3] if hits else None
+
+
+def plan_cotizador(op):
+    """Nombre (o clave) del plan en la lista «Plan» del cotizador."""
+    pf = str(op["baremo"]).split("/")[0].strip()
+    if op["modo"] == "tasa" or op["nombre"].startswith(("Tasa Baja", "Lanzamiento")):
+        return f"el que termina en «PF {pf}»"
+    t = op["tasas"][min(op["tasas"])]
+    clave = COTIZADOR_PLAN_ESTANDAR.get(round(t, 2))
+    if not clave:
+        return f"baremo PF {pf}"
+    try:      # «MM-AA» = mes de inicio de la oferta (p. ej. 11-26)
+        ini = date.fromisoformat(OFERTA.get("inicio") or "")
+        clave = clave.replace("MM-AA", f"{ini:%m-%y}")
+    except ValueError:
+        pass
+    return clave
+
+
+def captura_cotizador(res, op, ev):
+    """Pasos y valores exactos para capturar la cotización en el cotizador de Autoexpress (CreditoClick) y obtener
+    la misma mensualidad. Lista de (sección, campo, valor)."""
+    filas = []
+    add = lambda sec, campo, valor: filas.append((sec, campo, valor))
+    vc = vehiculo_cotizador(res["vehiculo"], None if res.get("precio_manual") else res["precio"])
+    add("Vehículo", "Tipo de vehículo · Uso", "Nuevo · Personal")
+    if vc:
+        add("Vehículo", "Marca · Año · Modelo · Versión", f"MG MOTOR · {vc[0]} · {vc[1]} · {vc[2]}")
+    else:
+        add("Vehículo", "Marca · Año · Modelo · Versión", f"MG MOTOR · {res['vehiculo']} (búscalo en el catálogo)")
+    if ev["bono_precio"]:
+        add("Vehículo", "Precio auto con IVA", f"{money(ev['precio_plan'])}  (lista {money0(ev['precio_lista'])} − "
+                                                f"bono {money0(ev['bono_precio'])}: cámbialo a mano)")
+    else:
+        add("Vehículo", "Precio auto con IVA", money(ev["precio_plan"]) + ("" if vc and not res.get("precio_manual")
+                                                                           else "  (captúralo)"))
+    if res.get("gap"):
+        modo = "Financiado" if res["gap_modo"] == "Financiado" else "Contado"
+        add("Vehículo", "Seguro GAP", f"Con GAP · Plan {res.get('gap_plan', GAP_PLAN_DEFAULT).upper()} · {modo} "
+                                      f"(importe {money(res['gap'])})")
+    else:
+        add("Vehículo", "Seguro GAP", "Sin GAP")
+    add("Vehículo", "Importe total del vehículo (lo calcula)", money(ev["base"]))
+    add("Crédito", "Enganche $ (captura este)", money(ev["eng_total"]) + (
+        f"  (cliente {money(ev['eng_cliente'])} + bono {money0(ev['bono_eng'])})" if ev["bono_eng"] else ""))
+    add("Crédito", "Enganche % (lo calcula)", f"{ev['pct'] * 100:.4f}")
+    add("Crédito", "Plan", plan_cotizador(op) + f"  · baremo {op['baremo']}")
+    add("Crédito", "Plazo", str(ev["plazo"]))
+    if ev.get("seguro_multi"):
+        seg = ("Autoexpress", "Financiado", "Forma de pago: Multianual", f"prima a {ev['plazo'] // 12} años "
+               f"{money(ev['seguro_multi'])}")
+    elif ev["seguro1_fin"]:
+        seg = ("Autoexpress", "Financiado", "Forma de pago: Fraccionado", f"prima anual {money(ev['seguro1_fin'])}")
+    elif ev["seguro1"]:
+        seg = ("Autoexpress", "Contado", "Forma de pago: Anual · Pago plazo remanente: Fraccionado",
+               f"año 1 de contado {money(ev['seguro1'])}")
+    else:
+        seg = None
+    if seg:
+        add("Seguro", "Contratación · Tipo de seguro", f"{seg[0]} · {seg[1]}")
+        add("Seguro", "Forma de pago", seg[2].replace("Forma de pago: ", ""))
+        add("Seguro", "Paquete · Aseguradora", f"El que cotizaste ({seg[3]})")
+    else:
+        add("Seguro", "Contratación", "Externa (o la póliza que elija el cliente; sin seguro en la mensualidad)")
+    add("Resultado", "Importe a financiar", money(ev["monto_total"]))
+    add("Resultado", "Mensualidad (resumen, meses 1-12)", money(ev["mens"]))
+    add("Resultado", "Comisión por apertura", money(ev["cxa"]))
+    add("Resultado", "Anticipo total", money(ev["pago_inicial"]))
+    return filas
+
+
 def describir(vehiculo, precio, bono):
     """Descripción de la oferta del boletín para el auto."""
     v = CATALOGO[vehiculo]
@@ -541,7 +661,7 @@ def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_man
                 seguro_anual=d["seguro_anual"], seguro_anual_estimado=not seguro_anual and bool(seguro1),
                 seguro1_fin=bool(seguro1_fin), resto_fin=bool(resto_fin), seguro_multi=bool(seguro_multi),
                 plazo=plazo, iva=iva, ops=ops, evals=evals, ranking=ranking, matriz=matriz, mejores=mejores,
-                rangos=rangos,
+                rangos=rangos, gap_plan=gap_plan, precio_manual=bool(precio_manual and precio_manual > 0),
                 color=COLORES.get(v["color"]), descripcion=describir(vehiculo, precio, v["bono"]),
                 requisitos=[requisito(o, d, plazo) for o in ops],
                 mens_min={o["nombre"]: mens_minimo(o, d) for o in ops})
