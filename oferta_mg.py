@@ -212,21 +212,33 @@ def ofertas_para(v):
 aplicar(oferta_base())
 
 
-# GAP: cada rango de precio del vehículo tiene su monto. PENDIENTE: aún no se tiene la tabla.
-# Llénala como [(precio_hasta, monto_gap), ...] en orden ascendente, p. ej. [(400000, 9500), (600000, 13530)].
-# Mientras esté vacía, el GAP queda desactivado en la app y en Colab.
-TABLA_GAP = []
+# GAP: el monto depende del rango del precio del auto (con IVA) y del plan. Tomado del cotizador de Autoexpress
+# (CreditoClick, nov-2026): rangos hasta $300,000 / $450,000 / $600,000 / $1,000,000 / $2,000,000; arriba de $2 M no
+# hay GAP. El monto es el mismo en todo el rango.
+GAP_PLANES = ("Básico RTI 2 y 3", "Estándar RTI 3 y 4", "Plus RTI 3 y 4", "Ultra RTI 2 y 3")
+GAP_PLAN_DEFAULT = "Plus RTI 3 y 4"         # el que trae preseleccionado el cotizador
+TABLA_GAP = [   # (precio_hasta, {plan: monto})
+    (300000, {"Básico RTI 2 y 3": 8250, "Estándar RTI 3 y 4": 7370, "Plus RTI 3 y 4": 9680, "Ultra RTI 2 y 3": 10560}),
+    (450000, {"Básico RTI 2 y 3": 11770, "Estándar RTI 3 y 4": 10890, "Plus RTI 3 y 4": 13530,
+              "Ultra RTI 2 y 3": 14410}),
+    (600000, {"Básico RTI 2 y 3": 12760, "Estándar RTI 3 y 4": 11880, "Plus RTI 3 y 4": 14300,
+              "Ultra RTI 2 y 3": 15180}),
+    (1000000, {"Básico RTI 2 y 3": 13750, "Estándar RTI 3 y 4": 12870, "Plus RTI 3 y 4": 15730,
+               "Ultra RTI 2 y 3": 16610}),
+    (2000000, {"Básico RTI 2 y 3": 28120, "Estándar RTI 3 y 4": 25690, "Plus RTI 3 y 4": 31240,
+               "Ultra RTI 2 y 3": 33720}),
+]
 
 
 def gap_disponible():
     return bool(TABLA_GAP)
 
 
-def monto_gap(precio):
-    """Monto de GAP para el precio del vehículo; None si no hay tabla o el precio queda fuera de rango."""
-    for hasta, monto in TABLA_GAP:
+def monto_gap(precio, plan=GAP_PLAN_DEFAULT):
+    """Monto de GAP para el precio del vehículo y el plan; None si el precio queda fuera de rango."""
+    for hasta, montos in TABLA_GAP:
         if precio <= hasta:
-            return float(monto)
+            return float(montos[plan])
     return None
 
 
@@ -494,12 +506,13 @@ GAP_MODOS = ("No", "Contado", "Financiado")
 
 
 def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_manual=0.0, gap_modo="No",
-             iva=True, pago_inicial=0.0, seguro1_fin=False, resto_fin=True, gap_monto=0.0, seguro_multi=False):
+             iva=True, pago_inicial=0.0, seguro1_fin=False, resto_fin=True, gap_monto=0.0, seguro_multi=False,
+             gap_plan=GAP_PLAN_DEFAULT):
     """pago = desembolso del cliente: lo que pone de su bolsa (pago inicial − bono al enganche).
     pago_inicial: si se captura (> 0) manda sobre `pago`: es el pago inicial de la cotización y el desembolso de cada
     plan sale de él (− bono al enganche si el plan lo lleva).
     gap_modo: «No», «Contado» (va en el pago inicial) o «Financiado» (se suma al precio). gap_monto: el monto de
-    GAP de la cotización; si es 0 se busca en TABLA_GAP (pendiente).
+    GAP de la cotización; si es 0 se toma de TABLA_GAP con el precio y `gap_plan`.
     seguro1_fin: el seguro del año 1 se financia (no va en el pago inicial). resto_fin: el de los años 2+ se financia
     (si no, el cliente lo paga de contado cada año)."""
     v = CATALOGO[vehiculo]
@@ -508,7 +521,7 @@ def analizar(vehiculo, pago, seguro1=0.0, seguro_anual=0.0, plazo=60, precio_man
         raise ValueError(f"«{vehiculo}» no tiene precio en el boletín: captura el precio.")
     gap = 0.0
     if gap_modo != "No":
-        gap = float(gap_monto) if gap_monto and gap_monto > 0 else ((monto_gap(precio) or 0.0) if gap_disponible()
+        gap = float(gap_monto) if gap_monto and gap_monto > 0 else ((monto_gap(precio, gap_plan) or 0.0) if gap_disponible()
                                                                     else 0.0)
     d = dict(precio=precio, gap=gap if gap_modo == "Financiado" else 0.0,
              gap_contado=gap if gap_modo == "Contado" else 0.0, bono=v["bono"], pago=pago_inicial or pago,

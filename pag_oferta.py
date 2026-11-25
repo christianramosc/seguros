@@ -9,8 +9,8 @@ el bono cuando va al enganche. Desembolso del cliente = pago inicial − bono al
 Orden de la página: datos de la operación → mejor opción (tarjetas) → tabla con todos los planes → pestañas «Por
 plazo», «Mínimos por plan» y «Oferta del auto» → descargas (PDF del análisis y PDF de mínimos).
 
-Por ahora sin GAP (faltan los precios actualizados) ni seguro de los años 2+: se activan con MOSTRAR_GAP y
-MOSTRAR_SEGURO_2.
+GAP con los montos del cotizador por rango de precio y plan (MOSTRAR_GAP). El seguro de los años 2+ sigue oculto
+(MOSTRAR_SEGURO_2).
 """
 import datetime as dt
 import re
@@ -26,7 +26,7 @@ from ui import APAGADO, RESALTE, VERDE_T, hero, insignias, nota, seccion, tarjet
 om = oferta_guardada.motor()
 VERSION = f"{om._mtime}-{om.OFERTA_ID}"     # llave de los cachés: cambia con el código o con la oferta
 
-MOSTRAR_GAP = False        # desactivado hasta tener los precios de GAP actualizados
+MOSTRAR_GAP = True         # montos de GAP por rango de precio y plan (oferta_mg.TABLA_GAP, cotizador nov-2026)
 MOSTRAR_SEGURO_2 = False   # seguro de los años 2+ oculto: la mensualidad no lo incluye
 
 D = lambda t: str(t).replace("$", "\\$")   # en markdown, «$» abre fórmulas
@@ -44,7 +44,7 @@ autos = list(om.CATALOGO)
 CAPTURAS = ("Desembolso", "Pago inicial")
 st.session_state.setdefault("of_pago", 130000)
 st.session_state.setdefault("of_pi", 0)
-seguro_anual, resto_fin, gap_modo, gap_monto = 0.0, True, "No", 0.0   # años 2+ fraccionados, como el cotizador
+seguro_anual, resto_fin, gap_modo, gap_monto, gap_plan = 0.0, True, "No", 0.0, om.GAP_PLAN_DEFAULT   # años 2+ fraccionados, como el cotizador
 with st.container(border=True):
     a1, a2 = st.columns([3, 1], vertical_alignment="bottom")
     if st.session_state.get("of_veh") not in autos:      # el auto ya no está en la oferta nueva
@@ -97,11 +97,19 @@ with st.container(border=True):
                                        key="of_seg_anual", help="En 0 = igual al año 1.")
         resto_fin = (c3.segmented_control("Seguro años 2+", ["Financiado", "Contado"], default="Financiado",
                                           key="of_seg2_modo") or "Financiado") == "Financiado"
-    if MOSTRAR_GAP:
-        gap_modo = c3.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap") or "No"
-        gap_monto = c3.number_input("Monto GAP", min_value=0.0, value=0.0, step=100.0, key="of_gap_monto",
-                                    disabled=gap_modo == "No")
     iva = c3.toggle("IVA sobre intereses", value=True, key="of_iva")
+    if MOSTRAR_GAP:
+        g1, g2, g3 = st.columns([1.3, 1.3, 1.4], vertical_alignment="bottom")
+        gap_modo = g1.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap") or "No"
+        gap_plan = g2.selectbox("Plan GAP", om.GAP_PLANES, index=om.GAP_PLANES.index(om.GAP_PLAN_DEFAULT),
+                                key="of_gap_plan", disabled=gap_modo == "No")
+        tabla = om.monto_gap(float(precio_manual or v["msrp"] or 0), gap_plan)
+        gap_monto = g3.number_input("Monto GAP", min_value=0.0, value=0.0, step=100.0, key="of_gap_monto",
+                                    disabled=gap_modo == "No",
+                                    help="0 = el de la tabla del cotizador para el precio y el plan.")
+        if gap_modo != "No":
+            nota(f"GAP {gap_plan}: {om.money0(tabla)} según el precio del auto." if tabla else
+                 "Sin GAP para este precio (el cotizador lo da hasta $2,000,000): captura el monto.")
 
 if om.requiere_precio(veh) and not precio_manual:
     st.markdown('<div class="vacio"><b>Captura el precio del auto</b><br>'
@@ -131,7 +139,7 @@ def pdf(version, a, cliente):
 
 args = (veh, float(pago), float(seguro1), float(seguro_anual), int(plazo), float(precio_manual), gap_modo, iva,
         float(pago_inicial) if captura == "Pago inicial" else 0.0, seguro1_fin, resto_fin,
-        float(gap_monto) if gap_modo != "No" else 0.0, seguro_multi)
+        float(gap_monto) if gap_modo != "No" else 0.0, seguro_multi, gap_plan)
 res = correr(VERSION, *args)
 ranking = res["ranking"]
 
