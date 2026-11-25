@@ -98,13 +98,16 @@ with st.container(border=True):
                               min_value=0.0, value=0.0, step=500.0, key="of_seg",
                               help="La prima de la aseguradora que elijas en el cotizador (Multianual: «calculada a "
                                    "N años»). En 0 si aún no la tienes: el comparativo dice hasta cuánto puede valer.")
-    gap_modo = c3.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap") or "No"
+    gap_modo = c3.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap", help=om.GAP_AYUDA) or "No"
     gap_plan = c4.selectbox("Plan GAP", om.GAP_PLANES, index=om.GAP_PLANES.index(om.GAP_PLAN_DEFAULT),
                             key="of_gap_plan", disabled=gap_modo == "No")
     if gap_modo != "No":   # monto de la tabla del cotizador (rango del precio de lista × plan)
         monto = om.monto_gap(precio_lista, gap_plan)
+        anios = om.gap_anios(gap_plan) if monto else ""
         insignias([f"GAP {gap_plan} {gap_modo.lower()}: {om.money0(monto)}" if monto else
-                   "Sin GAP para este precio (el cotizador lo da hasta $2,000,000)"])
+                   "Sin GAP para este precio (el cotizador lo da hasta $2,000,000)", anios], ok=(anios,))
+        alerta, texto = om.gap_aviso(gap_plan)
+        st.warning(texto, icon=":material/warning:") if alerta else nota(texto)
 seguro1_fin, seguro_multi = modo_seg == "Fraccionado", modo_seg == "Multianual"
 
 if om.requiere_precio(veh) and not precio_manual:
@@ -158,8 +161,9 @@ if ranking:
     tot, op, ev = next(x for x in ranking if x[1]["nombre"] == elegido)
     insignias([f"Baremo {op['baremo']}", f"Tasa {ev['tasa']:.2f}% ({ev['tasa_iva']:.2f}% con IVA)",
                f"Comisión {op['cxa']:.0%}", f"Bono {ev['forma']}",
-               f"Precio del plan {om.texto_precio(ev)}" if ev["bono_precio"] else ""],
-              ok=(f"Baremo {op['baremo']}",))
+               f"Precio del plan {om.texto_precio(ev)}" if ev["bono_precio"] else "",
+               f"GAP: {om.gap_anios(res['gap_plan']).split(' (')[0]}" if res["gap"] else ""],
+              ok=(f"Baremo {op['baremo']}", f"GAP: {om.gap_anios(res['gap_plan']).split(' (')[0]}"))
     k = st.columns(4)
     tarjeta(k[0], "", "Mensualidad", om.money(ev["mens"]), "meses 1-12, con seguro de vida", VERDE_T)
     tarjeta(k[1], "", "Pago inicial", om.money(ev["pago_inicial"]), om.desglose(ev))
