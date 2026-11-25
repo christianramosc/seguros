@@ -216,7 +216,7 @@ aplicar(oferta_base())
 # (CreditoClick, nov-2026): rangos hasta $300,000 / $450,000 / $600,000 / $1,000,000 / $2,000,000; arriba de $2 M no
 # hay GAP. El monto es el mismo en todo el rango.
 GAP_PLANES = ("Básico RTI 2 y 3", "Estándar RTI 3 y 4", "Plus RTI 3 y 4", "Ultra RTI 2 y 3")
-GAP_PLAN_DEFAULT = "Plus RTI 3 y 4"         # el que trae preseleccionado el cotizador
+GAP_PLAN_DEFAULT = "Básico RTI 2 y 3"   # con Amplia (valor factura el 1er año) no deja el año 2 descubierto
 # Qué es: GAP con RTI («Return to Invoice», valor factura). En pérdida total o robo total, la aseguradora del auto paga
 # valor factura solo los primeros meses y después valor comercial; el GAP paga la diferencia hasta el valor factura en
 # los años que dice el plan («RTI 2 y 3» = años 2 y 3 del auto; «RTI 3 y 4» = años 3 y 4). Requiere seguro de cobertura
