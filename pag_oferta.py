@@ -52,8 +52,11 @@ with st.container(border=True):
     defecto = "MG5 2027 1.5L COM EXCITE AT"
     veh = a1.selectbox("Auto", autos, index=autos.index(defecto) if defecto in autos else 0, key="of_veh")
     v = om.CATALOGO[veh]
-    precio_manual = a2.number_input("Precio", min_value=0, value=0, step=1000, key="of_precio",
-                                    help="0 = precio de lista. Obligatorio en Lanzamiento y «Otro».")
+    # el precio es siempre el de lista del boletín; solo se captura en los modelos que no lo traen (Lanzamiento, «Otro»)
+    precio_manual = 0
+    if not v["msrp"]:
+        precio_manual = a2.number_input("Precio de lista", min_value=0, value=0, step=1000, key="of_precio",
+                                        help="Este modelo no trae precio en el boletín.")
     if v["msrp"]:
         insignias([f"Lista {om.money0(v['msrp'])}", f"Bono {om.money0(v['bono'])}" if v["bono"] else "Sin bono",
                    f"Sistema {v['color']}% · {om.color_de(v['color'])}" if v["color"] else ""])
@@ -99,17 +102,14 @@ with st.container(border=True):
                                           key="of_seg2_modo") or "Financiado") == "Financiado"
     iva = c3.toggle("IVA sobre intereses", value=True, key="of_iva")
     if MOSTRAR_GAP:
-        g1, g2, g3 = st.columns([1.3, 1.3, 1.4], vertical_alignment="bottom")
+        g1, g2, g3 = st.columns([1.3, 1.3, 1.4], vertical_alignment="bottom")   # g3 queda libre
         gap_modo = g1.segmented_control("GAP", om.GAP_MODOS, default="No", key="of_gap") or "No"
         gap_plan = g2.selectbox("Plan GAP", om.GAP_PLANES, index=om.GAP_PLANES.index(om.GAP_PLAN_DEFAULT),
                                 key="of_gap_plan", disabled=gap_modo == "No")
         tabla = om.monto_gap(float(precio_manual or v["msrp"] or 0), gap_plan)
-        gap_monto = g3.number_input("Monto GAP", min_value=0.0, value=0.0, step=100.0, key="of_gap_monto",
-                                    disabled=gap_modo == "No",
-                                    help="0 = el de la tabla del cotizador para el precio y el plan.")
-        if gap_modo != "No":
-            nota(f"GAP {gap_plan}: {om.money0(tabla)} según el precio del auto." if tabla else
-                 "Sin GAP para este precio (el cotizador lo da hasta $2,000,000): captura el monto.")
+        if gap_modo != "No":   # el monto sale de la tabla del cotizador (rango de precio de lista × plan)
+            insignias([f"GAP {gap_plan}: {om.money0(tabla)}" if tabla else
+                       "Sin GAP para este precio (el cotizador lo da hasta $2,000,000)"], g3)
 
 if om.requiere_precio(veh) and not precio_manual:
     st.markdown('<div class="vacio"><b>Captura el precio del auto</b><br>'
