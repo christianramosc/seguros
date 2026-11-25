@@ -506,7 +506,7 @@ COTIZADOR_VEHICULOS = [
 COTIZADOR_PLAN_ESTANDAR = {   # tasa base del plan → clave al final del nombre
     13.74: "MG 30% ENG 0% CXA MM-AA PF M0002",
     17.74: "MG 0% CXA MM-AA PF M0003",
-    12.09: "12.09% MG 35% ENG MM-AA PF M0007",
+    12.09: "12.09% MG xx% ENG MM-AA (M0007 «35% ENG» o M0005 «40% ENG»: el que cumpla tu enganche)",
 }
 
 
